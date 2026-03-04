@@ -25,6 +25,7 @@ Output:
   Jot/Resources/Assets.xcassets/AppIcon.appiconset/1024-dark.png
   Jot/Resources/Assets.xcassets/AppIcon.appiconset/1024-tinted.png
   Jot/Resources/Assets.xcassets/AppIcon.appiconset/1024-clear.png
+  Jot/Resources/Assets.car          (compiled asset catalog; requires Xcode)
 EOF
   exit 1
 fi
@@ -105,3 +106,27 @@ cp "$DARK_SOURCE" "$ASSETS_APPICONSET_DIR/1024-dark.png"
 cp "$TINTED_SOURCE" "$ASSETS_APPICONSET_DIR/1024-tinted.png"
 cp "$CLEAR_SOURCE" "$ASSETS_APPICONSET_DIR/1024-clear.png"
 echo "Wrote themed appiconset PNGs in: $ASSETS_APPICONSET_DIR"
+
+# Compile Assets.car so release.sh doesn't need Xcode/actool at build time.
+ACTOOL_PATH=""
+if command -v xcrun >/dev/null 2>&1; then
+  ACTOOL_PATH="$(xcrun --find actool 2>/dev/null || true)"
+fi
+if [[ -n "$ACTOOL_PATH" ]]; then
+  ASSETS_CATALOG="$RESOURCES_DIR/Assets.xcassets"
+  ASSETS_CAR="$RESOURCES_DIR/Assets.car"
+  echo "==> Compiling Assets.car for themed app icons"
+  ACTOOL_TMP="$(mktemp -d /tmp/jot-actool.XXXXXX)"
+  "$ACTOOL_PATH" "$ASSETS_CATALOG" \
+    --compile "$ACTOOL_TMP" \
+    --platform macosx \
+    --minimum-deployment-target 14.0 \
+    --app-icon AppIcon \
+    --include-all-app-icons
+  cp "$ACTOOL_TMP/Assets.car" "$ASSETS_CAR"
+  rm -rf "$ACTOOL_TMP"
+  echo "Wrote compiled asset catalog: $ASSETS_CAR"
+else
+  echo "warning: actool not available; skipping Assets.car compilation"
+  echo "hint: install Xcode and run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
+fi

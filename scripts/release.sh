@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Augment PATH with common pip/Python user-install bin dirs so tools like
+# dmgbuild are discoverable even in non-login shells that lack a full PATH.
+for _py_ver in 3.13 3.12 3.11 3.10 3.9; do
+  _py_bin="$HOME/Library/Python/$_py_ver/bin"
+  if [[ -d "$_py_bin" && ":$PATH:" != *":$_py_bin:"* ]]; then
+    PATH="$_py_bin:$PATH"
+  fi
+done
+unset _py_ver _py_bin
+
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="Jot"
 INFO_PLIST="$ROOT_DIR/Jot/App/Info.plist"
@@ -12,18 +22,26 @@ SPARKLE_KEY_ACCOUNT="${SPARKLE_KEY_ACCOUNT:-ed25519}"
 SPARKLE_ED_KEY_FILE="${SPARKLE_ED_KEY_FILE:-}"
 SPARKLE_PRIVATE_KEY="${SPARKLE_PRIVATE_KEY:-}"
 DMG_BACKGROUND="${DMG_BACKGROUND:-}"
+DMG_TOOL="${DMG_TOOL:-auto}"
 DMG_ICON_SIZE="${DMG_ICON_SIZE:-128}"
 APP_ICON_ICNS="${APP_ICON_ICNS:-$ROOT_DIR/Jot/Resources/AppIcon.icns}"
 APP_ICON_LIGHT_ICNS="${APP_ICON_LIGHT_ICNS:-$ROOT_DIR/Jot/Resources/AppIconLight.icns}"
 APP_ICON_DARK_ICNS="${APP_ICON_DARK_ICNS:-$ROOT_DIR/Jot/Resources/AppIconDark.icns}"
-DMG_VOLUME_ICON_ICNS="${DMG_VOLUME_ICON_ICNS:-$APP_ICON_ICNS}"
-ASSETS_CATALOG="${ASSETS_CATALOG:-$ROOT_DIR/Jot/Resources/Assets.xcassets}"
-ACTOOL_PATH="${ACTOOL_PATH:-}"
+DMG_ICON_PNG="${DMG_ICON_PNG:-$ROOT_DIR/Jot/Resources/dmg.png}"
+DMG_VOLUME_ICON_ICNS="${DMG_VOLUME_ICON_ICNS:-}"
+DMG_APPLICATIONS_ALIAS="${DMG_APPLICATIONS_ALIAS:-$ROOT_DIR/Jot/Resources/Applications}"
+ASSETS_CAR="${ASSETS_CAR:-$ROOT_DIR/Jot/Resources/Assets.car}"
 
 if [[ -f "$ROOT_DIR/scripts/release.env" ]]; then
   # shellcheck disable=SC1091
   source "$ROOT_DIR/scripts/release.env"
 fi
+
+_DEFAULT_BG="$ROOT_DIR/Jot/Resources/DMG/background.png"
+if [[ -z "$DMG_BACKGROUND" && -f "$_DEFAULT_BG" ]]; then
+  DMG_BACKGROUND="$_DEFAULT_BG"
+fi
+unset _DEFAULT_BG
 
 if ! command -v swift >/dev/null 2>&1; then
   echo "error: swift not found"
@@ -45,15 +63,11 @@ if ! command -v codesign >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ -z "$ACTOOL_PATH" ]] && command -v xcrun >/dev/null 2>&1; then
-  ACTOOL_PATH="$(xcrun --find actool 2>/dev/null || true)"
-fi
-
 VERSION="${VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST")}"
 BUILD_NUMBER="${BUILD_NUMBER:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO_PLIST")}"
 REPO_OWNER="${REPO_OWNER:-}"
 REPO_NAME="${REPO_NAME:-}"
-RELEASE_TAG="${RELEASE_TAG:-v$VERSION}"
+RELEASE_TAG="${RELEASE_TAG:-}"
 
 usage() {
   cat <<EOF
@@ -76,13 +90,14 @@ Advanced env vars:
   SPARKLE_ED_KEY_FILE   path to private Sparkle EdDSA key file (overrides keychain account)
   SPARKLE_PRIVATE_KEY   private Sparkle EdDSA key string from env (highest priority)
   DMG_BACKGROUND        path to PNG/JPG background image for DMG window
+  DMG_TOOL              dmg builder: auto|dmgbuild|create-dmg|finder (default: auto)
+  DMG_VOLUME_NAME       mounted DMG volume name (default: "<App> <version>")
   DMG_ICON_SIZE         icon size in DMG Finder view (default: 128)
   APP_ICON_ICNS         fallback app icon .icns path (default: Jot/Resources/AppIcon.icns)
   APP_ICON_LIGHT_ICNS   light mode app icon .icns path (default: Jot/Resources/AppIconLight.icns)
   APP_ICON_DARK_ICNS    dark mode app icon .icns path (default: Jot/Resources/AppIconDark.icns)
   DMG_VOLUME_ICON_ICNS  dmg volume icon .icns path (default: APP_ICON_ICNS)
-  ASSETS_CATALOG        path to icon asset catalog (default: Jot/Resources/Assets.xcassets)
-  ACTOOL_PATH           optional explicit path to actool binary
+  ASSETS_CAR            path to pre-compiled Assets.car (default: Jot/Resources/Assets.car)
 EOF
 }
 
@@ -130,6 +145,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+DMG_VOLUME_NAME="${DMG_VOLUME_NAME:-$APP_NAME $VERSION}"
+if [[ -z "$RELEASE_TAG" ]]; then
+  RELEASE_TAG="v$VERSION"
+fi
 
 echo "==> Using version $VERSION ($BUILD_NUMBER)"
 echo "==> Building release binary"
@@ -180,37 +200,15 @@ if [[ "$icon_installed" -eq 1 ]]; then
     || /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$DIST_DIR/$APP_NAME.app/Contents/Info.plist"
 fi
 
-# Compile asset catalog for modern icon theming (light/dark/tinted/clear).
-if [[ -d "$ASSETS_CATALOG" ]]; then
-  ICONSET_DIR="$ASSETS_CATALOG/AppIcon.appiconset"
-  required_iconset_files=("Contents.json" "1024-any.png" "1024-dark.png" "1024-tinted.png" "1024-clear.png")
-  missing_files=()
-  for file_name in "${required_iconset_files[@]}"; do
-    if [[ ! -f "$ICONSET_DIR/$file_name" ]]; then
-      missing_files+=("$file_name")
-    fi
-  done
-
-  if [[ ${#missing_files[@]} -eq 0 ]]; then
-    if [[ -n "$ACTOOL_PATH" ]]; then
-      echo "==> Compiling asset catalog for themed app icons"
-      "$ACTOOL_PATH" "$ASSETS_CATALOG" \
-        --compile "$DIST_DIR/$APP_NAME.app/Contents/Resources" \
-        --platform macosx \
-        --minimum-deployment-target 14.0 \
-        --app-icon AppIcon \
-        --include-all-app-icons
-
-      /usr/libexec/PlistBuddy -c "Set :CFBundleIconName AppIcon" "$DIST_DIR/$APP_NAME.app/Contents/Info.plist" \
-        || /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string AppIcon" "$DIST_DIR/$APP_NAME.app/Contents/Info.plist"
-    else
-      echo "warning: actool not available; skipping themed asset-catalog icon compile"
-      echo "hint: install full Xcode and run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
-    fi
-  else
-    echo "warning: skipping asset-catalog icon compile; missing in $ICONSET_DIR:"
-    printf '  - %s\n' "${missing_files[@]}"
-  fi
+# Copy pre-compiled asset catalog for modern icon theming (light/dark/tinted/clear).
+if [[ -f "$ASSETS_CAR" ]]; then
+  echo "==> Copying pre-compiled Assets.car for themed app icons"
+  cp "$ASSETS_CAR" "$DIST_DIR/$APP_NAME.app/Contents/Resources/Assets.car"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleIconName AppIcon" "$DIST_DIR/$APP_NAME.app/Contents/Info.plist" \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string AppIcon" "$DIST_DIR/$APP_NAME.app/Contents/Info.plist"
+else
+  echo "warning: Assets.car not found at $ASSETS_CAR; themed icons will not be available"
+  echo "hint: run scripts/make-app-icon.sh on a machine with Xcode to regenerate it"
 fi
 
 # Ensure executable can find embedded Sparkle.framework in packaged app.
@@ -231,16 +229,92 @@ echo "==> Packaging zip for Sparkle: $ZIP_PATH"
 ditto -c -k --keepParent "$DIST_DIR/$APP_NAME.app" "$ZIP_PATH"
 
 if [[ "$SKIP_DMG" -eq 0 ]]; then
+  # Convert DMG icon PNG to .icns if no explicit .icns was provided.
+  if [[ -z "$DMG_VOLUME_ICON_ICNS" && -f "$DMG_ICON_PNG" ]]; then
+    _iconset="$DIST_DIR/dmg_icon.iconset"
+    rm -rf "$_iconset"
+    mkdir -p "$_iconset"
+    for _sz in 16 32 128 256 512; do
+      sips -z $_sz $_sz "$DMG_ICON_PNG" --out "$_iconset/icon_${_sz}x${_sz}.png" >/dev/null
+      _sz2=$((_sz * 2))
+      sips -z $_sz2 $_sz2 "$DMG_ICON_PNG" --out "$_iconset/icon_${_sz}x${_sz}@2x.png" >/dev/null
+    done
+    iconutil -c icns "$_iconset" -o "$DIST_DIR/dmg_icon.icns"
+    rm -rf "$_iconset"
+    DMG_VOLUME_ICON_ICNS="$DIST_DIR/dmg_icon.icns"
+  fi
+  if [[ -z "$DMG_VOLUME_ICON_ICNS" ]]; then
+    DMG_VOLUME_ICON_ICNS="$APP_ICON_ICNS"
+  fi
+
   DMG_PATH="$DIST_DIR/$APP_NAME-$VERSION.dmg"
   echo "==> Packaging drag-install DMG: $DMG_PATH"
   rm -f "$DMG_PATH"
+
+  # Finder background aliases can break when the target volume is mounted as
+  # "<name> 1" due to an existing mount. Detach matching mounted volumes first.
+  shopt -s nullglob
+  for _mounted in "/Volumes/$DMG_VOLUME_NAME"*; do
+    if [[ -d "$_mounted" ]]; then
+      hdiutil detach "$_mounted" -quiet >/dev/null 2>&1 || true
+    fi
+  done
+  shopt -u nullglob
+  unset _mounted
 
   if [[ -n "$DMG_BACKGROUND" && ! -f "$DMG_BACKGROUND" ]]; then
     echo "error: DMG background not found: $DMG_BACKGROUND"
     exit 1
   fi
 
+  # Resolve dmgbuild binary — pip installs it under the user Python bin dir which
+  # is often absent from PATH in non-login shells (e.g. when run from an IDE).
+  DMGBUILD_BIN=""
   if command -v dmgbuild >/dev/null 2>&1; then
+    DMGBUILD_BIN="$(command -v dmgbuild)"
+  elif command -v python3 >/dev/null 2>&1; then
+    _py_user_base="$(python3 -m site --user-base 2>/dev/null || true)"
+    if [[ -n "$_py_user_base" && -x "$_py_user_base/bin/dmgbuild" ]]; then
+      DMGBUILD_BIN="$_py_user_base/bin/dmgbuild"
+    fi
+    unset _py_user_base
+  fi
+
+  USE_DMGBUILD=0
+  USE_CREATEDMG=0
+  USE_FINDER=0
+  case "$DMG_TOOL" in
+    auto)
+      if command -v create-dmg >/dev/null 2>&1; then
+        USE_CREATEDMG=1
+      elif [[ -n "$DMGBUILD_BIN" ]]; then
+        USE_DMGBUILD=1
+      else
+        USE_FINDER=1
+      fi
+      ;;
+    dmgbuild)
+      if [[ -z "$DMGBUILD_BIN" ]]; then
+        echo "error: dmgbuild not found; install with: pip install dmgbuild"
+        exit 1
+      fi
+      USE_DMGBUILD=1
+      ;;
+    create-dmg)
+      # create-dmg uses AppleScript/Finder and may require explicit Automation
+      # permission (System Settings -> Privacy & Security -> Automation).
+      USE_CREATEDMG=1
+      ;;
+    finder)
+      USE_FINDER=1
+      ;;
+    *)
+      echo "error: invalid DMG_TOOL '$DMG_TOOL' (expected auto|dmgbuild|create-dmg|finder)"
+      exit 1
+      ;;
+  esac
+
+  if [[ "$USE_DMGBUILD" -eq 1 ]]; then
     # dmgbuild constructs .DS_Store programmatically — no Finder/AppleScript
     # dependency — avoiding macOS Tahoe's symlink-icon rendering bugs.
     echo "    (using dmgbuild)"
@@ -252,26 +326,45 @@ if [[ "$SKIP_DMG" -eq 0 ]]; then
     dmgbuild_args=(-s "$DMGBUILD_SETTINGS")
     dmgbuild_args+=(-D "app_path=$DIST_DIR/$APP_NAME.app")
     dmgbuild_args+=(-D "icon_size=$DMG_ICON_SIZE")
+
+    _volume_icon=""
+    if [[ -f "$DMG_VOLUME_ICON_ICNS" ]]; then
+      _volume_icon="$DMG_VOLUME_ICON_ICNS"
+    elif [[ -f "$APP_ICON_ICNS" ]]; then
+      _volume_icon="$APP_ICON_ICNS"
+    elif [[ -f "$APP_ICON_LIGHT_ICNS" ]]; then
+      _volume_icon="$APP_ICON_LIGHT_ICNS"
+    elif [[ -f "$APP_ICON_DARK_ICNS" ]]; then
+      _volume_icon="$APP_ICON_DARK_ICNS"
+    fi
+    if [[ -n "$_volume_icon" ]]; then
+      dmgbuild_args+=(-D "volume_icon=$_volume_icon")
+    fi
+    unset _volume_icon
+
     if [[ -n "$DMG_BACKGROUND" ]]; then
       dmgbuild_args+=(-D "background=$DMG_BACKGROUND")
     fi
-    dmgbuild "${dmgbuild_args[@]}" "$APP_NAME" "$DMG_PATH"
+    if [[ -n "$DMG_APPLICATIONS_ALIAS" && -f "$DMG_APPLICATIONS_ALIAS" ]]; then
+      dmgbuild_args+=(-D "applications_alias=$DMG_APPLICATIONS_ALIAS")
+    fi
+    "$DMGBUILD_BIN" "${dmgbuild_args[@]}" "$DMG_VOLUME_NAME" "$DMG_PATH"
 
-  elif command -v create-dmg >/dev/null 2>&1; then
+  elif [[ "$USE_CREATEDMG" -eq 1 ]]; then
     echo "    (using create-dmg)"
     DMG_STAGING="$DIST_DIR/dmg-staging"
     rm -rf "$DMG_STAGING"
     mkdir -p "$DMG_STAGING"
     cp -R "$DIST_DIR/$APP_NAME.app" "$DMG_STAGING/"
     dmg_args=(
-      --volname "$APP_NAME"
+      --volname "$DMG_VOLUME_NAME"
       --window-pos 120 120
-      --window-size 780 500
+      --window-size 780 528
       --filesystem HFS+
       --icon-size "$DMG_ICON_SIZE"
-      --icon "$APP_NAME.app" 180 230
+      --icon "$APP_NAME.app" 260 240
       --hide-extension "$APP_NAME.app"
-      --app-drop-link 500 230
+      --app-drop-link 520 240
       --no-internet-enable
     )
     if [[ ! -f "$DMG_VOLUME_ICON_ICNS" && -f "$APP_ICON_LIGHT_ICNS" ]]; then
@@ -287,19 +380,22 @@ if [[ "$SKIP_DMG" -eq 0 ]]; then
     rm -rf "$DMG_STAGING"
 
   else
-    echo "warning: neither dmgbuild nor create-dmg installed; using hdiutil fallback"
-    echo "hint: pip install dmgbuild  (recommended) or  brew install create-dmg"
+    if [[ "$USE_FINDER" -eq 1 && "$DMG_TOOL" != "auto" ]]; then
+      echo "    (using finder/hdiutil)"
+    else
+      echo "warning: neither dmgbuild nor create-dmg installed; using hdiutil fallback"
+      echo "hint: pip install dmgbuild  (recommended) or  brew install create-dmg"
+    fi
     DMG_STAGING="$DIST_DIR/dmg-staging"
     DMG_RW_PATH="$DIST_DIR/$APP_NAME-$VERSION-rw.dmg"
     rm -rf "$DMG_STAGING"
     mkdir -p "$DMG_STAGING"
     cp -R "$DIST_DIR/$APP_NAME.app" "$DMG_STAGING/"
-    ln -snf /Applications "$DMG_STAGING/Applications"
     rm -f "$DMG_RW_PATH"
-    hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGING" -ov -format UDRW "$DMG_RW_PATH" >/dev/null
+    hdiutil create -volname "$DMG_VOLUME_NAME" -fs HFS+ -srcfolder "$DMG_STAGING" -ov -format UDRW "$DMG_RW_PATH" >/dev/null
 
     ATTACH_OUTPUT="$(hdiutil attach -readwrite -noverify -noautoopen "$DMG_RW_PATH")"
-    MOUNT_POINT="$(echo "$ATTACH_OUTPUT" | awk '/\/Volumes\// { for (i=1; i<=NF; i++) if ($i ~ /^\/Volumes\//) { print $i; exit } }')"
+    MOUNT_POINT="$(printf '%s\n' "$ATTACH_OUTPUT" | sed -nE 's#^.*(/Volumes/.*)$#\1#p' | head -n 1)"
     if [[ -z "$MOUNT_POINT" ]]; then
       echo "error: failed to mount temporary DMG"
       echo "$ATTACH_OUTPUT"
@@ -314,48 +410,78 @@ if [[ "$SKIP_DMG" -eq 0 ]]; then
     }
     trap cleanup_mounted_dmg EXIT
 
-    BG_NAME=""
+    BG_POSIX_PATH=""
     if [[ -n "$DMG_BACKGROUND" ]]; then
       mkdir -p "$MOUNT_POINT/.background"
-      cp "$DMG_BACKGROUND" "$MOUNT_POINT/.background/$(basename "$DMG_BACKGROUND")"
-      BG_NAME=".background/$(basename "$DMG_BACKGROUND")"
+      BG_FILE="$(basename "$DMG_BACKGROUND")"
+      cp "$DMG_BACKGROUND" "$MOUNT_POINT/.background/$BG_FILE"
+      BG_POSIX_PATH="$MOUNT_POINT/.background/$BG_FILE"
     fi
 
     if command -v osascript >/dev/null 2>&1; then
-      if ! osascript >/dev/null 2>&1 <<EOF
+      OSA_OUTPUT=""
+      if ! OSA_OUTPUT="$(osascript 2>&1 <<EOF
 tell application "Finder"
   tell disk "$MOUNT_VOLUME_NAME"
     open
+    try
+      if exists item "Applications" then delete item "Applications"
+    end try
+    try
+      make new alias file to folder "Applications" of startup disk at disk "$MOUNT_VOLUME_NAME"
+      if exists item "Applications alias" then set name of item "Applications alias" to "Applications"
+    end try
     tell container window
       set current view to icon view
       set toolbar visible to false
       set statusbar visible to false
-      set bounds to {120, 120, 780, 500}
+      set bounds to {120, 120, 900, 648}
       set opts to the icon view options
-      set icon size of opts to $DMG_ICON_SIZE
+      try
+        set icon size of opts to $DMG_ICON_SIZE
+      end try
+      try
+        set text size of opts to 14
+      end try
+      try
+        set shows item info of opts to false
+      end try
+      try
+        set shows icon preview of opts to true
+      end try
       try
         set arrangement of opts to not arranged
       end try
-$(if [[ -n "$BG_NAME" ]]; then
-  printf '      set background picture of opts to file "%s"\n' "$BG_NAME"
+$(if [[ -n "${BG_POSIX_PATH:-}" ]]; then
+  printf '      try\n'
+  printf '        set bgAlias to (POSIX file "%s") as alias\n' "$BG_POSIX_PATH"
+  printf '        set background picture of opts to bgAlias\n'
+  printf '      end try\n'
 fi)
     end tell
     try
-      set position of item "$APP_NAME.app" to {180, 230}
-      set position of item "Applications" to {500, 230}
+      set position of item "$APP_NAME.app" to {260, 240}
+      set position of item "Applications" to {520, 240}
     end try
-    close
-    open
     update without registering applications
     delay 2
+    close
+    open
+    delay 1
   end tell
 end tell
 EOF
+)"
       then
         echo "warning: Finder styling failed; continuing with default DMG layout"
+        if [[ -n "$OSA_OUTPUT" ]]; then
+          echo "Finder error:"
+          echo "$OSA_OUTPUT"
+        fi
       fi
     fi
 
+    rm -rf "$MOUNT_POINT/.fseventsd" "$MOUNT_POINT/.Trashes"
     sync
     cleanup_mounted_dmg
     trap - EXIT
@@ -363,6 +489,7 @@ EOF
     rm -f "$DMG_RW_PATH"
     rm -rf "$DMG_STAGING"
   fi
+  rm -f "$DIST_DIR/dmg_icon.icns"
 fi
 
 if [[ "$SKIP_APPCAST" -eq 0 ]]; then

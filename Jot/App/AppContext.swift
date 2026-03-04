@@ -34,6 +34,10 @@ final class AppContext: ObservableObject {
             NSApplication.shared.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
+        statusBar.onCheckForUpdates = { [weak self] in
+            self?.checkForUpdates()
+        }
+        statusBar.canCheckForUpdates = canCheckForUpdates
     }
 
     func bootstrap() {

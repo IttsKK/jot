@@ -11,6 +11,8 @@ final class StatusBarController: NSObject {
 
     var onOpenApp: (() -> Void)?
     var onOpenSettings: (() -> Void)?
+    var onCheckForUpdates: (() -> Void)?
+    var canCheckForUpdates: Bool = false
 
     init(database: DatabaseManager, settings: SettingsStore, overlay: OverlayController) {
         self.database = database
@@ -56,7 +58,7 @@ final class StatusBarController: NSObject {
     }
 
     @objc private func checkForUpdates() {
-        AppContext.shared.checkForUpdates()
+        onCheckForUpdates?()
     }
 
     @objc private func quitApp() {
@@ -89,7 +91,7 @@ final class StatusBarController: NSObject {
         menu.addItem(makeOpenAppMenuItem())
         menu.addItem(NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: ","))
         let checkForUpdatesItem = NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: "")
-        checkForUpdatesItem.isEnabled = AppContext.shared.canCheckForUpdates
+        checkForUpdatesItem.isEnabled = canCheckForUpdates
         menu.addItem(checkForUpdatesItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))

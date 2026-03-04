@@ -1,0 +1,8 @@
+{
+    "git.autoRepositoryDetection": "openEditors",
+    "git.repositoryScanMaxDepth": 1,
+    "git.ignoredRepositories": [
+        ".build/checkouts/GRDB.swift",
+        ".build/checkouts/Sparkle"
+    ]
+}
