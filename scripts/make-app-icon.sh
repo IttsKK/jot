@@ -5,7 +5,6 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 LIGHT_SRC_PNG="${1:-}"
 DARK_SRC_PNG="${2:-}"
 TINTED_SRC_PNG="${3:-}"
-CLEAR_SRC_PNG="${4:-}"
 RESOURCES_DIR="$ROOT_DIR/Jot/Resources"
 OUT_LIGHT_ICNS="$RESOURCES_DIR/AppIconLight.icns"
 OUT_DARK_ICNS="$RESOURCES_DIR/AppIconDark.icns"
@@ -15,16 +14,13 @@ ASSETS_APPICONSET_DIR="$RESOURCES_DIR/Assets.xcassets/AppIcon.appiconset"
 if [[ -z "$LIGHT_SRC_PNG" ]]; then
   cat <<EOF
 Usage:
-  scripts/make-app-icon.sh <light-1024.png> [dark-1024.png] [tinted-1024.png] [clear-1024.png]
+  scripts/make-app-icon.sh <light-1024.png> [dark-1024.png] [tinted-1024.png]
 
 Output:
   Jot/Resources/AppIcon.icns        (fallback)
   Jot/Resources/AppIconLight.icns   (always generated)
   Jot/Resources/AppIconDark.icns    (always generated; falls back to light)
-  Jot/Resources/Assets.xcassets/AppIcon.appiconset/1024-any.png
-  Jot/Resources/Assets.xcassets/AppIcon.appiconset/1024-dark.png
-  Jot/Resources/Assets.xcassets/AppIcon.appiconset/1024-tinted.png
-  Jot/Resources/Assets.xcassets/AppIcon.appiconset/1024-clear.png
+  Jot/Resources/Assets.xcassets/AppIcon.appiconset/icon_*.png (all sizes)
   Jot/Resources/Assets.car          (compiled asset catalog; requires Xcode)
 EOF
   exit 1
@@ -40,10 +36,6 @@ if [[ -n "$DARK_SRC_PNG" && ! -f "$DARK_SRC_PNG" ]]; then
 fi
 if [[ -n "$TINTED_SRC_PNG" && ! -f "$TINTED_SRC_PNG" ]]; then
   echo "error: tinted source image not found: $TINTED_SRC_PNG"
-  exit 1
-fi
-if [[ -n "$CLEAR_SRC_PNG" && ! -f "$CLEAR_SRC_PNG" ]]; then
-  echo "error: clear source image not found: $CLEAR_SRC_PNG"
   exit 1
 fi
 
@@ -96,15 +88,25 @@ echo "Wrote fallback icon: $OUT_FALLBACK_ICNS"
 
 DARK_SOURCE="${DARK_SRC_PNG:-$LIGHT_SRC_PNG}"
 TINTED_SOURCE="${TINTED_SRC_PNG:-$LIGHT_SRC_PNG}"
-CLEAR_SOURCE="${CLEAR_SRC_PNG:-$LIGHT_SRC_PNG}"
 
 build_icns "$DARK_SOURCE" "$OUT_DARK_ICNS"
 
 mkdir -p "$ASSETS_APPICONSET_DIR"
-cp "$LIGHT_SRC_PNG" "$ASSETS_APPICONSET_DIR/1024-any.png"
-cp "$DARK_SOURCE" "$ASSETS_APPICONSET_DIR/1024-dark.png"
-cp "$TINTED_SOURCE" "$ASSETS_APPICONSET_DIR/1024-tinted.png"
-cp "$CLEAR_SOURCE" "$ASSETS_APPICONSET_DIR/1024-clear.png"
+
+# Generate all required sizes for each appearance variant.
+render_iconset_sizes() {
+  local src="$1"
+  local prefix="$2"
+  for size in 16 32 128 256 512; do
+    sips -z "$size" "$size" "$src" --out "$ASSETS_APPICONSET_DIR/${prefix}${size}x${size}.png" >/dev/null
+    size2=$((size * 2))
+    sips -z "$size2" "$size2" "$src" --out "$ASSETS_APPICONSET_DIR/${prefix}${size}x${size}@2x.png" >/dev/null
+  done
+}
+
+render_iconset_sizes "$LIGHT_SRC_PNG" "icon_"
+render_iconset_sizes "$DARK_SOURCE" "icon_dark_"
+render_iconset_sizes "$TINTED_SOURCE" "icon_tinted_"
 echo "Wrote themed appiconset PNGs in: $ASSETS_APPICONSET_DIR"
 
 # Compile Assets.car so release.sh doesn't need Xcode/actool at build time.
@@ -122,7 +124,8 @@ if [[ -n "$ACTOOL_PATH" ]]; then
     --platform macosx \
     --minimum-deployment-target 14.0 \
     --app-icon AppIcon \
-    --include-all-app-icons
+    --include-all-app-icons \
+    --output-partial-info-plist "$ACTOOL_TMP/partial-info.plist"
   cp "$ACTOOL_TMP/Assets.car" "$ASSETS_CAR"
   rm -rf "$ACTOOL_TMP"
   echo "Wrote compiled asset catalog: $ASSETS_CAR"

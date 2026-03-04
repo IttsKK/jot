@@ -23,18 +23,14 @@ This repo uses a local-first release flow:
 2. Ship a release
 
 ```bash
-# Build artifacts locally
-./scripts/release.sh --version 1.0.1 --owner IttsKK --repo jot
+# One command: bumps version, builds, signs, and uploads to GitHub
+./scripts/publish.sh 1.0.1
 
-# Create GitHub release with artifacts
-gh release create v1.0.1 \
-  release-feed/Jot-1.0.1.zip \
-  dist/Jot-1.0.1.dmg \
-  release-feed/appcast.xml \
-  --title "Jot 1.0.1"
+# Or create a draft release first
+./scripts/publish.sh 1.0.1 --draft
 ```
 
-GitHub Actions will automatically deploy `appcast.xml` to Pages.
+This bumps `Info.plist` version fields, runs `release.sh` (build + sign + DMG + appcast), and creates a GitHub release with all artifacts attached. GitHub Actions will automatically deploy `appcast.xml` to Pages when the release is published.
 
 ## Local build prerequisites
 
