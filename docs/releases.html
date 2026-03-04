@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jot - Releases</title>
+    <meta name="description" content="Release notes and downloads for Jot, the minimal task tracker for macOS.">
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/png" href="assets/app-icon.png">
+    <!-- Marked.js for parsing markdown in release notes -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-content">
+            <div class="brand">
+                <div class="logo-icon"></div>
+                <span class="brand-name">Jot</span>
+            </div>
+            <div class="nav-links">
+                <a href="index.html#features">Features</a>
+                <a href="releases.html" class="secondary-link" style="color: var(--text-primary);">Releases</a>
+                <a href="https://github.com/IttsKK/jot" target="_blank" rel="noopener noreferrer" class="github-link" title="View on GitHub">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+                    </svg>
+                </a>
+                <button class="btn btn-primary btn-small" onclick="triggerNavDownload(this)">Download</button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="releases-page">
+        <section class="releases-header reveal">
+            <h1>Release Notes</h1>
+            <p>What's new in Jot.</p>
+        </section>
+
+        <section class="releases-list" id="releases-container">
+            <div class="loading-spinner">Loading releases...</div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="footer-content">
+            <div class="footer-brand">
+                <div class="logo-icon small"></div>
+                <span>Jot for Mac</span>
+            </div>
+            <div class="footer-links">
+                <a href="#">Privacy Policy</a>
+                <a href="#">Terms of Service</a>
+                <a href="https://github.com/IttsKK/jot" target="_blank" rel="noopener noreferrer">GitHub</a>
+                <a href="https://twitter.com/">Twitter</a>
+            </div>
+            <div class="footer-copyright">
+                &copy; <script>document.write(new Date().getFullYear())</script> Jot. All rights reserved.
+            </div>
+        </div>
+    </footer>
+
+    <style>
+        @keyframes spin { to { transform: rotate(360deg); } }
+        button.btn { font-family: inherit; font-size: inherit; cursor: pointer; }
+        button.btn:disabled { opacity: 0.7; cursor: not-allowed; }
+        .download-btn { margin-top: 8px; }
+    </style>
+    <script>
+        async function triggerNavDownload(btn) {
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.textContent = '…';
+            try {
+                const res = await fetch('https://api.github.com/repos/IttsKK/jot/releases/latest');
+                const release = await res.json();
+                const dmg = release.assets.find(a => a.name.endsWith('.dmg'));
+                const url = dmg ? dmg.browser_download_url : release.html_url;
+                const link = document.createElement('a');
+                link.href = url;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                btn.textContent = 'Downloading…';
+                setTimeout(() => { btn.disabled = false; btn.innerHTML = original; }, 3000);
+            } catch {
+                btn.disabled = false;
+                btn.innerHTML = original;
+                window.open('https://github.com/IttsKK/jot/releases/latest', '_blank');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const container = document.getElementById('releases-container');
+            
+            try {
+                // Fetch releases from GitHub API
+                const response = await fetch('https://api.github.com/repos/IttsKK/jot/releases');
+                if (!response.ok) throw new Error('Failed to fetch releases');
+                
+                const releases = await response.json();
+                
+                container.innerHTML = ''; // clear loading state
+                
+                if (releases.length === 0) {
+                    container.innerHTML = '<p class="empty-state">No releases found yet.</p>';
+                    return;
+                }
+                
+                releases.forEach((release, index) => {
+                    const date = new Date(release.published_at).toLocaleDateString('en-US', {
+                        year: 'numeric', month: 'long', day: 'numeric'
+                    });
+                    
+                    const releaseEl = document.createElement('div');
+                    releaseEl.className = 'release-card reveal';
+                    releaseEl.style.transitionDelay = `${index * 0.1}s`;
+                    
+                    let bodyHtml = '';
+                    if (release.body) {
+                        // Use marked.js to render markdown securely and properly
+                        bodyHtml = `<div class="release-body">${marked.parse(release.body)}</div>`;
+                    }
+                    
+                    // Find the DMG asset for the download button, fallback to standard release url
+                    const dmgAsset = release.assets.find(a => a.name.endsWith('.dmg'));
+                    const downloadLink = dmgAsset ? dmgAsset.browser_download_url : release.html_url;
+
+                    releaseEl.innerHTML = `
+                        <div class="release-meta">
+                            <span class="release-version">${release.name || release.tag_name}</span>
+                            <span class="release-date">${date}</span>
+                            ${release.prerelease ? '<span class="badge prerelease">Pre-release</span>' : ''}
+                        </div>
+                        <div class="release-content">
+                            ${bodyHtml}
+                            <a href="${downloadLink}" class="btn btn-primary btn-small download-btn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                                Download ${release.tag_name}
+                            </a>
+                        </div>
+                    `;
+                    
+                    container.appendChild(releaseEl);
+                });
+                
+                // Initialize Intersection Observer for reveal animations
+                const observerOptions = {
+                    root: null,
+                    rootMargin: '0px',
+                    threshold: 0.1
+                };
+
+                const observer = new IntersectionObserver((entries, obs) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting) {
+                            entry.target.classList.add('active');
+                            obs.unobserve(entry.target);
+                        }
+                    });
+                }, observerOptions);
+
+                document.querySelectorAll('.reveal').forEach((el) => {
+                    observer.observe(el);
+                });
+
+            } catch (error) {
+                container.innerHTML = '<p class="error-state">Failed to load releases. <a href="https://github.com/IttsKK/jot/releases" target="_blank">View on GitHub instead</a>.</p>';
+            }
+        });
+    </script>
+</body>
+</html>
