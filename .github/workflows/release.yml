@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: macos-latest
+    outputs:
+      version: ${{ steps.vars.outputs.version }}
+      tag: ${{ steps.vars.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Derive version and tag
+        id: vars
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME:-}"
+          if [[ -z "$TAG" ]]; then
+            echo "error: missing tag (expected push on v*)"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Using tag=$TAG version=$VERSION"
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+          xcrun --find actool
+
+      - name: Install dmgbuild
+        run: python3 -m pip install --upgrade dmgbuild
+
+      - name: Validate Sparkle key secret
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          if [[ -z "$SPARKLE_PRIVATE_KEY" ]]; then
+            echo "error: missing repository secret SPARKLE_PRIVATE_KEY"
+            exit 1
+          fi
+
+      - name: Build artifacts + appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          ./scripts/release.sh \
+            --version "${{ steps.vars.outputs.version }}" \
+            --build "${{ github.run_number }}" \
+            --tag "${{ steps.vars.outputs.tag }}" \
+            --owner "${{ github.repository_owner }}" \
+            --repo "${{ github.event.repository.name }}"
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          VERSION="${{ steps.vars.outputs.version }}"
+          ZIP_FILE="release-feed/Jot-$VERSION.zip"
+          DMG_FILE="dist/Jot-$VERSION.dmg"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP_FILE" "$DMG_FILE" --clobber
+          else
+            gh release create "$TAG" "$ZIP_FILE" "$DMG_FILE" \
+              --title "Jot $VERSION" \
+              --notes "Automated release for $TAG."
+          fi
+
+      - name: Prepare Pages artifact
+        shell: bash
+        run: |
+          mkdir -p pages
+          cp release-feed/appcast.xml pages/appcast.xml
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages
+
+  deploy-pages:
+    needs: build-release
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
