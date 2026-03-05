@@ -8,8 +8,8 @@ struct CaptureView: View {
 
     private var isInMeeting: Bool { viewModel.meetingSession.isInMeeting }
     private var meetingTitle: String { viewModel.meetingSession.activeMeeting?.title ?? "" }
-    private var isThought: Bool { viewModel.parsed.type == .thought }
-    private var hasForcedMode: Bool { viewModel.forcedKind != nil || viewModel.forcedQueue != nil }
+    private var isThought: Bool { viewModel.parsed.queue == .thought }
+    private var hasForcedMode: Bool { viewModel.forcedQueue != nil }
 
     var body: some View {
         ZStack {
@@ -58,7 +58,7 @@ struct CaptureView: View {
 
     private var capturePrompt: String {
         if isInMeeting { return "Note, task, follow-up..." }
-        if viewModel.forcedKind == .thought { return "What's on your mind?" }
+        if viewModel.forcedQueue == .thought { return "What's on your mind?" }
         return "Type a task..."
     }
 
@@ -77,10 +77,10 @@ struct CaptureView: View {
     private var chipRow: some View {
         HStack(spacing: 8) {
             if isThought {
-                modeChip("Thought", color: .indigo, isForced: viewModel.forcedKind == .thought)
+                modeChip("Thought", color: .indigo, isForced: viewModel.forcedQueue == .thought)
             } else {
                 modeChip("Queue: \(viewModel.parsed.queue.displayName)",
-                         color: viewModel.parsed.queue == .work ? .orange : .blue,
+                         color: queueColor(viewModel.parsed.queue),
                          isForced: viewModel.forcedQueue != nil)
                 if let date = viewModel.parsed.dueDate {
                     chip(relativeDate(date), color: .pink)
@@ -127,6 +127,14 @@ struct CaptureView: View {
             .overlay(
                 Capsule().stroke(color.opacity(0.35), lineWidth: 1)
             )
+    }
+
+    private func queueColor(_ queue: TaskQueue) -> Color {
+        switch queue {
+        case .work: return .orange
+        case .reachOut: return .blue
+        case .thought: return .indigo
+        }
     }
 
     private func relativeDate(_ date: Date) -> String {

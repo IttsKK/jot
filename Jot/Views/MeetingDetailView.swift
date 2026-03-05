@@ -7,9 +7,9 @@ struct MeetingDetailView: View {
     var onToggleDone: (Task) -> Void
     var onDelete: (Task) -> Void
 
-    private var notes: [Task] { items.filter { $0.kind == .thought } }
-    private var tasks: [Task] { items.filter { $0.kind == .task && $0.queue == .work } }
-    private var followUps: [Task] { items.filter { $0.kind == .task && $0.queue == .reachOut } }
+    private var notes: [Task] { items.filter { $0.queue == .thought } }
+    private var tasks: [Task] { items.filter { $0.queue == .work } }
+    private var followUps: [Task] { items.filter { $0.queue == .reachOut } }
 
     private var dateFormatter: DateFormatter {
         let f = DateFormatter()
@@ -105,7 +105,7 @@ struct MeetingDetailView: View {
 
     private func meetingItemRow(_ item: Task) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            if item.kind == .task {
+            if item.queue != .thought {
                 Button(action: { onToggleDone(item) }) {
                     Image(systemName: item.status == .active ? "circle" : "checkmark.circle.fill")
                         .font(.system(size: 16, weight: .semibold))
@@ -123,7 +123,7 @@ struct MeetingDetailView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)
                     .font(.system(size: 14, weight: .medium))
-                    .strikethrough(item.status != .active && item.kind == .task)
+                    .strikethrough(item.status != .active && item.queue != .thought)
                     .foregroundStyle(item.status != .active ? .secondary : .primary)
 
                 if let note = item.note, !note.isEmpty {

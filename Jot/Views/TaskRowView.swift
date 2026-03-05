@@ -38,7 +38,7 @@ struct TaskRowView: View {
                         pill(text: relativeDueText(due), color: dueColor(due))
                     }
                     if showQueueBadge {
-                        pill(text: task.queue.displayName, color: task.queue == .work ? .orange : .blue)
+                        pill(text: task.queue.displayName, color: queueColor(task.queue))
                     }
                 }
             }
@@ -76,6 +76,14 @@ struct TaskRowView: View {
             withAnimation(.easeOut(duration: 0.12)) {
                 isHovering = hovering
             }
+        }
+    }
+
+    private func queueColor(_ queue: TaskQueue) -> Color {
+        switch queue {
+        case .work: return .orange
+        case .reachOut: return .blue
+        case .thought: return .indigo
         }
     }
 

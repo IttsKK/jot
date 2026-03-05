@@ -5,7 +5,6 @@ final class CaptureViewModel: ObservableObject {
     @Published var input: String = ""
     @Published var focusNonce: UUID = UUID()
     @Published private(set) var parsed: ParsedTask = ParsedTask(rawInput: "", title: "", type: .task, queue: .work, person: nil, dueDate: nil, note: nil)
-    @Published private(set) var forcedKind: ItemKind? = nil
     @Published private(set) var forcedQueue: TaskQueue? = nil
 
     let database: DatabaseManager
@@ -19,11 +18,9 @@ final class CaptureViewModel: ObservableObject {
     }
 
     func updateParse() {
-        // Consume mode-setting prefixes immediately when the full token is written (prefix + space)
         if consumeNextPrefix() { return }
 
         if input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            forcedKind = nil
             forcedQueue = nil
             parsed = ParsedTask(rawInput: "", title: "", type: .task, queue: settings.defaultQueue, person: nil, dueDate: nil, note: nil)
             return
@@ -31,29 +28,26 @@ final class CaptureViewModel: ObservableObject {
 
         parsed = TaskParser.parse(input)
 
-        // Overlay forced modes onto parse result
-        if forcedKind == .thought {
-            parsed.type = .thought
-        }
         if let q = forcedQueue {
             parsed.queue = q
+            if q == .thought { parsed.type = .thought }
         }
     }
 
-    /// Strips a single mode prefix from `input` and records the mode. Returns `true` if a prefix was consumed
-    /// (caller should return early — updateParse will be triggered again by the input change).
+    /// Strips a single mode prefix and records the forced queue. Returns `true` when consumed
+    /// so the caller can bail early — `updateParse` will fire again after `input` changes.
     @discardableResult
     private func consumeNextPrefix() -> Bool {
-        let prefixes: [(String, () -> Void)] = [
-            ("/t ", { self.forcedKind = .thought; self.forcedQueue = nil }),
-            ("// ", { self.forcedKind = .thought; self.forcedQueue = nil }),
-            ("/w ", { self.forcedQueue = .work }),
-            ("/r ", { self.forcedQueue = .reachOut }),
+        let prefixes: [(String, TaskQueue)] = [
+            ("/t ",  .thought),
+            ("// ",  .thought),
+            ("/w ",  .work),
+            ("/r ",  .reachOut),
         ]
-        for (prefix, apply) in prefixes {
+        for (prefix, queue) in prefixes {
             if input.hasPrefix(prefix) {
                 input = String(input.dropFirst(prefix.count))
-                apply()
+                forcedQueue = queue
                 return true
             }
         }
@@ -63,14 +57,14 @@ final class CaptureViewModel: ObservableObject {
     func save() throws {
         let raw = parsed.title.isEmpty ? TaskParser.parse(input) : parsed
         var effective = raw
-        if forcedKind == .thought { effective.type = .thought }
-        if let q = forcedQueue { effective.queue = q }
+        if let q = forcedQueue {
+            effective.queue = q
+            if q == .thought { effective.type = .thought }
+        }
 
         let title = TaskTextFormatter.formattedTitle(effective.title)
         guard !title.isEmpty else { return }
 
-        let isThought = effective.type == .thought
-        let kind: ItemKind = isThought ? .thought : .task
         let meetingId = meetingSession.activeMeeting?.id
 
         var person = TaskTextFormatter.formattedPerson(effective.person)
@@ -81,19 +75,17 @@ final class CaptureViewModel: ObservableObject {
         try database.createTask(
             rawInput: input,
             title: title,
-            queue: isThought ? .work : effective.queue,
+            queue: effective.queue,
             person: person,
             dueDate: effective.dueDate,
             note: TaskTextFormatter.formattedNote(effective.note),
-            meetingId: meetingId,
-            kind: kind
+            meetingId: meetingId
         )
         clear()
     }
 
     func clear() {
         input = ""
-        forcedKind = nil
         forcedQueue = nil
         parsed = ParsedTask(rawInput: "", title: "", type: .task, queue: settings.defaultQueue, person: nil, dueDate: nil, note: nil)
     }
@@ -102,4 +94,3 @@ final class CaptureViewModel: ObservableObject {
         focusNonce = UUID()
     }
 }
-

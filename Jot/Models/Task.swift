@@ -16,7 +16,6 @@ struct Task: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, E
     var createdAt: String
     var position: Int64
     var meetingId: String?
-    var kind: ItemKind
 
     enum Columns {
         static let id = Column("id")
@@ -31,7 +30,6 @@ struct Task: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, E
         static let createdAt = Column("created_at")
         static let position = Column("position")
         static let meetingId = Column("meeting_id")
-        static let kind = Column("kind")
     }
 
     enum CodingKeys: String, CodingKey {
@@ -47,7 +45,6 @@ struct Task: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, E
         case createdAt = "created_at"
         case position
         case meetingId = "meeting_id"
-        case kind
     }
 
     init(
@@ -62,8 +59,7 @@ struct Task: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, E
         doneAt: Date? = nil,
         createdAt: Date = .now,
         position: Int64 = 0,
-        meetingId: String? = nil,
-        kind: ItemKind = .task
+        meetingId: String? = nil
     ) {
         self.id = id
         self.rawInput = rawInput
@@ -77,18 +73,9 @@ struct Task: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, E
         self.createdAt = DateCodec.string(from: createdAt)
         self.position = position
         self.meetingId = meetingId
-        self.kind = kind
     }
 
-    var dueDateValue: Date? {
-        DateCodec.date(from: dueDate)
-    }
-
-    var doneAtValue: Date? {
-        DateCodec.date(from: doneAt)
-    }
-
-    var createdAtValue: Date? {
-        DateCodec.date(from: createdAt)
-    }
+    var dueDateValue: Date? { DateCodec.date(from: dueDate) }
+    var doneAtValue: Date? { DateCodec.date(from: doneAt) }
+    var createdAtValue: Date? { DateCodec.date(from: createdAt) }
 }

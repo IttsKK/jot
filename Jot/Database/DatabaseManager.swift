@@ -42,7 +42,6 @@ final class DatabaseManager {
         }
 
         migrator.registerMigration("v2_meeting_inbox") { db in
-            // Add meetings table
             try db.create(table: Meeting.databaseTableName) { table in
                 table.column("id", .text).primaryKey()
                 table.column("title", .text).notNull()
@@ -51,12 +50,17 @@ final class DatabaseManager {
                 table.column("ended_at", .text)
             }
             try db.create(index: "idx_meetings_started_at", on: Meeting.databaseTableName, columns: ["started_at"])
-
-            // Add meeting_id and kind to tasks
             try db.alter(table: Task.databaseTableName) { table in
                 table.add(column: "meeting_id", .text)
-                table.add(column: "kind", .text).notNull().defaults(to: ItemKind.task.rawValue)
+                table.add(column: "kind", .text).notNull().defaults(to: "task")
             }
+        }
+
+        migrator.registerMigration("v3_thought_queue") { db in
+            // Promote thoughts from kind='thought' flag to a proper queue value
+            try db.execute(
+                sql: "UPDATE tasks SET queue = 'thought' WHERE kind = 'thought'"
+            )
         }
 
         return migrator
@@ -73,7 +77,6 @@ final class DatabaseManager {
         dueDate: Date? = nil,
         note: String? = nil,
         meetingId: String? = nil,
-        kind: ItemKind = .task,
         now: Date = .now
     ) throws -> Task {
         var task = Task(
@@ -86,10 +89,8 @@ final class DatabaseManager {
             note: note,
             createdAt: now,
             position: try nextPosition(in: queue),
-            meetingId: meetingId,
-            kind: kind
+            meetingId: meetingId
         )
-
         try dbQueue.write { db in
             try task.insert(db)
         }
@@ -126,7 +127,7 @@ final class DatabaseManager {
     func fetchThoughts() throws -> [Task] {
         try dbQueue.read { db in
             try Task
-                .filter(Task.Columns.kind == ItemKind.thought.rawValue)
+                .filter(Task.Columns.queue == TaskQueue.thought.rawValue)
                 .filter(Task.Columns.meetingId == nil)
                 .order(Task.Columns.createdAt.desc)
                 .fetchAll(db)
@@ -185,20 +186,15 @@ final class DatabaseManager {
             )
             return db.changesCount
         }
-        if archived > 0 {
-            notifyChange()
-        }
+        if archived > 0 { notifyChange() }
         return Int(archived)
     }
 
     func dueTodayTasks(limit: Int = 5, now: Date = .now, calendar: Calendar = .current) throws -> [Task] {
         let startOfDay = calendar.startOfDay(for: now)
-        guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else {
-            return []
-        }
+        guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else { return [] }
         let start = DateCodec.string(from: startOfDay)
         let end = DateCodec.string(from: endOfDay)
-
         return try dbQueue.read { db in
             try Task
                 .filter(Task.Columns.status == TaskStatus.active.rawValue)
@@ -244,9 +240,7 @@ final class DatabaseManager {
                 .filter(Task.Columns.dueDate < nowString)
                 .fetchAll(db)
         }
-
         guard !tasks.isEmpty else { return }
-
         try dbQueue.write { db in
             for var task in tasks {
                 let from = task.dueDateValue ?? now
@@ -261,9 +255,7 @@ final class DatabaseManager {
     func deleteTasks(ids: Set<String>) throws {
         guard !ids.isEmpty else { return }
         try dbQueue.write { db in
-            for id in ids {
-                try Task.deleteOne(db, key: id)
-            }
+            for id in ids { try Task.deleteOne(db, key: id) }
         }
         notifyChange()
     }
@@ -309,18 +301,14 @@ final class DatabaseManager {
     @discardableResult
     func createMeeting(title: String, attendees: String? = nil, now: Date = .now) throws -> Meeting {
         var meeting = Meeting(title: title, attendees: attendees, startedAt: now)
-        try dbQueue.write { db in
-            try meeting.insert(db)
-        }
+        try dbQueue.write { db in try meeting.insert(db) }
         notifyChange()
         return meeting
     }
 
     func fetchMeetings() throws -> [Meeting] {
         try dbQueue.read { db in
-            try Meeting
-                .order(Meeting.Columns.startedAt.desc)
-                .fetchAll(db)
+            try Meeting.order(Meeting.Columns.startedAt.desc).fetchAll(db)
         }
     }
 
@@ -345,18 +333,13 @@ final class DatabaseManager {
     func deleteMeeting(id: String) throws {
         try dbQueue.write { db in
             try Meeting.deleteOne(db, key: id)
-            try db.execute(
-                sql: "UPDATE tasks SET meeting_id = NULL WHERE meeting_id = ?",
-                arguments: [id]
-            )
+            try db.execute(sql: "UPDATE tasks SET meeting_id = NULL WHERE meeting_id = ?", arguments: [id])
         }
         notifyChange()
     }
 
     func updateMeeting(_ meeting: Meeting) throws {
-        try dbQueue.write { db in
-            try meeting.update(db)
-        }
+        try dbQueue.write { db in try meeting.update(db) }
         notifyChange()
     }
 
