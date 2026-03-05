@@ -12,6 +12,7 @@ final class AppContext: ObservableObject {
 
     let database: DatabaseManager
     let settings: SettingsStore
+    let meetingSession: MeetingSession
     let overlay: OverlayController
     let statusBar: StatusBarController
     let notificationManager: NotificationManager
@@ -23,8 +24,9 @@ final class AppContext: ObservableObject {
     private init() {
         database = try! DatabaseManager()
         settings = SettingsStore()
-        overlay = OverlayController(database: database, settings: settings)
-        statusBar = StatusBarController(database: database, settings: settings, overlay: overlay)
+        meetingSession = MeetingSession(database: database)
+        overlay = OverlayController(database: database, settings: settings, meetingSession: meetingSession)
+        statusBar = StatusBarController(database: database, settings: settings, overlay: overlay, meetingSession: meetingSession)
         notificationManager = NotificationManager(database: database, settings: settings)
 
         statusBar.onOpenApp = { [weak self] in
@@ -94,7 +96,7 @@ final class AppContext: ObservableObject {
         overlay.hide()
         NSApplication.shared.setActivationPolicy(.regular)
         if mainWindowController == nil {
-            mainWindowController = MainWindowController(database: database, settings: settings)
+            mainWindowController = MainWindowController(database: database, settings: settings, meetingSession: meetingSession)
             mainWindowController?.onMainWindowClosed = { [weak self] in
                 self?.handleMainWindowClosed()
             }

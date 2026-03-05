@@ -3,6 +3,7 @@ import Foundation
 enum ParsedTaskType: String, Sendable {
     case followUp = "follow_up"
     case task
+    case thought
 }
 
 struct ParsedTask: Equatable, Sendable {

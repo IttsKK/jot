@@ -7,6 +7,7 @@ final class StatusBarController: NSObject {
     private let database: DatabaseManager
     private let settings: SettingsStore
     private let overlay: OverlayController
+    private let meetingSession: MeetingSession
     private var observers: [NSObjectProtocol] = []
 
     var onOpenApp: (() -> Void)?
@@ -14,10 +15,11 @@ final class StatusBarController: NSObject {
     var onCheckForUpdates: (() -> Void)?
     var canCheckForUpdates: Bool = false
 
-    init(database: DatabaseManager, settings: SettingsStore, overlay: OverlayController) {
+    init(database: DatabaseManager, settings: SettingsStore, overlay: OverlayController, meetingSession: MeetingSession) {
         self.database = database
         self.settings = settings
         self.overlay = overlay
+        self.meetingSession = meetingSession
         super.init()
 
         if let button = statusItem.button {
@@ -65,8 +67,64 @@ final class StatusBarController: NSObject {
         NSApplication.shared.terminate(nil)
     }
 
+    @objc private func startMeeting() {
+        let alert = NSAlert()
+        alert.messageText = "Start Meeting"
+        alert.informativeText = "Enter meeting name and attendees (optional, comma-separated)."
+        alert.addButton(withTitle: "Start")
+        alert.addButton(withTitle: "Cancel")
+
+        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 300, height: 56))
+        stack.orientation = .vertical
+        stack.spacing = 8
+
+        let titleField = NSTextField(frame: NSRect(x: 0, y: 28, width: 300, height: 24))
+        titleField.placeholderString = "Meeting name"
+        titleField.bezelStyle = .roundedBezel
+
+        let attendeesField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        attendeesField.placeholderString = "Attendees (e.g. Sarah, John)"
+        attendeesField.bezelStyle = .roundedBezel
+
+        stack.addArrangedSubview(titleField)
+        stack.addArrangedSubview(attendeesField)
+        alert.accessoryView = stack
+        alert.window.initialFirstResponder = titleField
+
+        NSApp.activate(ignoringOtherApps: true)
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else { return }
+
+        let title = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        let attendees = attendeesField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        try? meetingSession.startMeeting(title: title, attendees: attendees.isEmpty ? nil : attendees)
+        rebuildMenu()
+    }
+
+    @objc private func endMeeting() {
+        try? meetingSession.endCurrentMeeting()
+        rebuildMenu()
+    }
+
     private func rebuildMenu() {
         let menu = NSMenu()
+
+        // Meeting section
+        if meetingSession.isInMeeting, let meeting = meetingSession.activeMeeting {
+            let meetingItem = NSMenuItem(title: "In Meeting: \(meeting.title)", action: nil, keyEquivalent: "")
+            meetingItem.isEnabled = false
+            menu.addItem(meetingItem)
+
+            let endItem = NSMenuItem(title: "End Meeting", action: #selector(endMeeting), keyEquivalent: "")
+            menu.addItem(endItem)
+            menu.addItem(.separator())
+        } else {
+            let startItem = NSMenuItem(title: "Start Meeting", action: #selector(startMeeting), keyEquivalent: "")
+            menu.addItem(startItem)
+            menu.addItem(.separator())
+        }
 
         let dueTodayCount = (try? database.dueTodayCount()) ?? 0
         let summary = NSMenuItem(title: "Due today: \(dueTodayCount)", action: nil, keyEquivalent: "")
@@ -98,6 +156,14 @@ final class StatusBarController: NSObject {
 
         menu.items.forEach { $0.target = self }
         statusItem.menu = menu
+
+        if let button = statusItem.button {
+            if meetingSession.isInMeeting {
+                button.image = NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: "Jot — In Meeting")
+            } else {
+                button.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "Jot")
+            }
+        }
     }
 
     private func makeQuickAddMenuItem() -> NSMenuItem {

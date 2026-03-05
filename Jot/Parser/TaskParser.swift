@@ -14,6 +14,12 @@ enum TaskParser {
 
         var working = raw
 
+        // Check for thought prefix (/t or //)
+        if isThoughtPrefix(working) {
+            let stripped = strippingThoughtPrefix(working)
+            return ParsedTask(rawInput: raw, title: stripped.isEmpty ? raw : stripped, type: .thought, queue: .work, person: nil, dueDate: nil, note: nil)
+        }
+
         let override = queueOverride(in: working)
         if override != nil {
             working = strippingRegex(#"(?:^|\s)/(?:w|r)(?=\s|$)"#, from: working)
@@ -51,6 +57,24 @@ enum TaskParser {
             dueDate: dueDate,
             note: note
         )
+    }
+
+    private static func isThoughtPrefix(_ input: String) -> Bool {
+        let lower = input.lowercased()
+        return lower.hasPrefix("/t ") || lower == "/t" || input.hasPrefix("// ")
+    }
+
+    private static func strippingThoughtPrefix(_ input: String) -> String {
+        if input.lowercased().hasPrefix("/t ") {
+            return String(input.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+        }
+        if input.lowercased() == "/t" {
+            return ""
+        }
+        if input.hasPrefix("// ") {
+            return String(input.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+        }
+        return input
     }
 
     private static func queueOverride(in input: String) -> TaskQueue? {

@@ -5,8 +5,8 @@ import SwiftUI
 final class MainWindowController: NSWindowController, NSWindowDelegate {
     var onMainWindowClosed: (() -> Void)?
 
-    init(database: DatabaseManager, settings: SettingsStore) {
-        let root = MainTaskListView(database: database, settings: settings)
+    init(database: DatabaseManager, settings: SettingsStore, meetingSession: MeetingSession) {
+        let root = MainTaskListView(database: database, settings: settings, meetingSession: meetingSession)
         let host = NSHostingController(rootView: root)
         let window = NSWindow(contentViewController: host)
         window.title = "Jot"

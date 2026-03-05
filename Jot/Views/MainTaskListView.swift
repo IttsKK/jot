@@ -3,11 +3,13 @@ import SwiftUI
 struct MainTaskListView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var settings: SettingsStore
+    @ObservedObject private var meetingSession: MeetingSession
     @StateObject private var viewModel: TaskListViewModel
     @State private var archiveExpanded = false
     @State private var composer: TaskComposerState
     @State private var showDeleteConfirmation = false
     @State private var selectedMetadataField: MetadataField = .main
+    @State private var selectedMeeting: Meeting? = nil
     @State private var metadataEditorInput: String = ""
     @FocusState private var focusedComposerField: ComposerField?
 
@@ -44,8 +46,9 @@ struct MainTaskListView: View {
         }
     }
 
-    init(database: DatabaseManager, settings: SettingsStore) {
+    init(database: DatabaseManager, settings: SettingsStore, meetingSession: MeetingSession) {
         self.settings = settings
+        self.meetingSession = meetingSession
         _viewModel = StateObject(wrappedValue: TaskListViewModel(database: database))
         _composer = State(initialValue: TaskComposerState.capture(defaultQueue: settings.defaultQueue))
     }
@@ -57,22 +60,28 @@ struct MainTaskListView: View {
             VStack(spacing: 14) {
                 topPanel
 
-                if viewModel.visibleTasks.isEmpty {
-                    emptyStatePanel
+                if viewModel.selectedTab == .meetings {
+                    meetingsPanel
+                } else if viewModel.selectedTab == .inbox {
+                    inboxPanel
                 } else {
-                    if viewModel.isMultiSelect {
-                        bulkActionsBar
-                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    if viewModel.visibleTasks.isEmpty {
+                        emptyStatePanel
+                    } else {
+                        if viewModel.isMultiSelect {
+                            bulkActionsBar
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                        taskListPanel
                     }
-                    taskListPanel
-                }
 
-                if let task = singleSelectedTask {
-                    taskDetailsPanel(task: task)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                }
+                    if let task = singleSelectedTask {
+                        taskDetailsPanel(task: task)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
 
-                composerPanel
+                    composerPanel
+                }
             }
             .animation(.easeOut(duration: 0.18), value: singleSelectedTask?.id)
             .padding(20)
@@ -127,9 +136,9 @@ struct MainTaskListView: View {
                     Text("Jot")
                         .font(.system(size: 30, weight: .bold, design: .rounded))
 
-                    Text("Keep work and follow ups moving")
+                    Text(meetingSession.isInMeeting ? "In meeting: \(meetingSession.activeMeeting?.title ?? "")" : "Keep work and follow ups moving")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(meetingSession.isInMeeting ? Color.purple.opacity(0.85) : .secondary)
                 }
 
                 Spacer()
@@ -139,12 +148,251 @@ struct MainTaskListView: View {
                 tabButton(.all, shortcut: "1")
                 tabButton(.work, shortcut: "2")
                 tabButton(.reachOut, shortcut: "3")
+                tabButton(.meetings, shortcut: "4")
+                tabButton(.inbox, shortcut: "5")
                 Spacer()
             }
         }
         .padding(16)
         .background(glassPanel(cornerRadius: 16))
         .shadow(color: Color.black.opacity(0.06), radius: 12, y: 5)
+    }
+
+    private var meetingsPanel: some View {
+        HStack(spacing: 16) {
+            // Meeting list sidebar
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Meetings")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 8)
+
+                if viewModel.meetings.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: "video.slash")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.secondary)
+                        Text("No meetings yet")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Text("Start a meeting from the menu bar")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding()
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 6) {
+                            ForEach(viewModel.meetings) { meeting in
+                                meetingRow(meeting)
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 10)
+                    }
+                }
+            }
+            .frame(width: 240)
+            .frame(maxHeight: .infinity)
+            .background(glassPanel(cornerRadius: 16))
+            .shadow(color: Color.black.opacity(0.05), radius: 12, y: 5)
+
+            // Meeting detail
+            Group {
+                if let meeting = selectedMeeting ?? viewModel.meetings.first(where: { $0.isActive }) ?? viewModel.meetings.first {
+                    MeetingDetailView(
+                        meeting: meeting,
+                        items: viewModel.tasksForMeeting(meeting),
+                        onToggleDone: { viewModel.toggleDone($0) },
+                        onDelete: { viewModel.delete($0) }
+                    )
+                } else {
+                    VStack(spacing: 12) {
+                        Image(systemName: "note.text")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.secondary)
+                        Text("Select a meeting")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(glassPanel(cornerRadius: 16))
+            .shadow(color: Color.black.opacity(0.05), radius: 12, y: 5)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func meetingRow(_ meeting: Meeting) -> some View {
+        let isSelected = selectedMeeting?.id == meeting.id
+        return Button {
+            selectedMeeting = meeting
+        } label: {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        if meeting.isActive {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 7, height: 7)
+                        }
+                        Text(meeting.title)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(isSelected ? Color.blue.opacity(0.95) : .primary)
+                            .lineLimit(1)
+                    }
+
+                    if let start = meeting.startedAtValue {
+                        Text(shortDateFormatter.string(from: start))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if !meeting.attendeeList.isEmpty {
+                        Text(meeting.attendeeList.joined(separator: ", "))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer()
+
+                let count = viewModel.tasksForMeeting(meeting).count
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.system(size: 11, weight: .bold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.blue.opacity(0.15)))
+                        .foregroundStyle(Color.blue.opacity(0.8))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isSelected ? Color.blue.opacity(0.12) : Color.clear)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(isSelected ? Color.blue.opacity(0.25) : Color.clear, lineWidth: 1)
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button(role: .destructive) {
+                if selectedMeeting?.id == meeting.id { selectedMeeting = nil }
+                viewModel.deleteMeeting(meeting)
+            } label: {
+                Label("Delete Meeting", systemImage: "trash")
+            }
+        }
+    }
+
+    private var shortDateFormatter: DateFormatter {
+        let f = DateFormatter()
+        f.dateStyle = .short
+        f.timeStyle = .short
+        return f
+    }
+
+    private var inboxPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Inbox")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.secondary)
+                Text("—")
+                    .foregroundStyle(.tertiary)
+                Text("Brain dumps and random thoughts")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Text("Type // or /t to capture a thought")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+
+            if viewModel.thoughts.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "brain")
+                        .font(.system(size: 36))
+                        .foregroundStyle(.secondary)
+                    Text("Nothing in your inbox")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Text("Use // or /t in quick capture to dump a thought.\nNo structure needed.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 6) {
+                        ForEach(viewModel.thoughts) { thought in
+                            thoughtRow(thought)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(glassPanel(cornerRadius: 18))
+        .shadow(color: Color.black.opacity(0.05), radius: 14, y: 5)
+    }
+
+    private func thoughtRow(_ thought: Task) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "bubble.left")
+                .font(.system(size: 14))
+                .foregroundStyle(Color.indigo.opacity(0.6))
+                .frame(width: 18)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(thought.title)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let created = thought.createdAtValue {
+                    Text(RelativeDateTimeFormatter().localizedString(for: created, relativeTo: .now))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(.thinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(panelStrokeColor, lineWidth: 1)
+                )
+        )
+        .contextMenu {
+            Button(role: .destructive) { viewModel.delete(thought) } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
     }
 
     private var taskListPanel: some View {

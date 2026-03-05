@@ -9,10 +9,10 @@ final class OverlayController: NSObject {
     private var viewModel: CaptureViewModel
     private var appResignObserver: NSObjectProtocol?
 
-    init(database: DatabaseManager, settings: SettingsStore) {
+    init(database: DatabaseManager, settings: SettingsStore, meetingSession: MeetingSession) {
         self.database = database
         self.settings = settings
-        self.viewModel = CaptureViewModel(database: database, settings: settings)
+        self.viewModel = CaptureViewModel(database: database, settings: settings, meetingSession: meetingSession)
         super.init()
         appResignObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification,
