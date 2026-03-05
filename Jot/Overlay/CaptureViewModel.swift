@@ -5,6 +5,8 @@ final class CaptureViewModel: ObservableObject {
     @Published var input: String = ""
     @Published var focusNonce: UUID = UUID()
     @Published private(set) var parsed: ParsedTask = ParsedTask(rawInput: "", title: "", type: .task, queue: .work, person: nil, dueDate: nil, note: nil)
+    @Published private(set) var forcedKind: ItemKind? = nil
+    @Published private(set) var forcedQueue: TaskQueue? = nil
 
     let database: DatabaseManager
     let settings: SettingsStore
@@ -17,14 +19,53 @@ final class CaptureViewModel: ObservableObject {
     }
 
     func updateParse() {
-        parsed = TaskParser.parse(input)
+        // Consume mode-setting prefixes immediately when the full token is written (prefix + space)
+        if consumeNextPrefix() { return }
+
         if input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            parsed.queue = settings.defaultQueue
+            forcedKind = nil
+            forcedQueue = nil
+            parsed = ParsedTask(rawInput: "", title: "", type: .task, queue: settings.defaultQueue, person: nil, dueDate: nil, note: nil)
+            return
+        }
+
+        parsed = TaskParser.parse(input)
+
+        // Overlay forced modes onto parse result
+        if forcedKind == .thought {
+            parsed.type = .thought
+        }
+        if let q = forcedQueue {
+            parsed.queue = q
         }
     }
 
+    /// Strips a single mode prefix from `input` and records the mode. Returns `true` if a prefix was consumed
+    /// (caller should return early — updateParse will be triggered again by the input change).
+    @discardableResult
+    private func consumeNextPrefix() -> Bool {
+        let prefixes: [(String, () -> Void)] = [
+            ("/t ", { self.forcedKind = .thought; self.forcedQueue = nil }),
+            ("// ", { self.forcedKind = .thought; self.forcedQueue = nil }),
+            ("/w ", { self.forcedQueue = .work }),
+            ("/r ", { self.forcedQueue = .reachOut }),
+        ]
+        for (prefix, apply) in prefixes {
+            if input.hasPrefix(prefix) {
+                input = String(input.dropFirst(prefix.count))
+                apply()
+                return true
+            }
+        }
+        return false
+    }
+
     func save() throws {
-        let effective = parsed.title.isEmpty ? TaskParser.parse(input) : parsed
+        let raw = parsed.title.isEmpty ? TaskParser.parse(input) : parsed
+        var effective = raw
+        if forcedKind == .thought { effective.type = .thought }
+        if let q = forcedQueue { effective.queue = q }
+
         let title = TaskTextFormatter.formattedTitle(effective.title)
         guard !title.isEmpty else { return }
 
@@ -32,7 +73,6 @@ final class CaptureViewModel: ObservableObject {
         let kind: ItemKind = isThought ? .thought : .task
         let meetingId = meetingSession.activeMeeting?.id
 
-        // In a meeting: if no person extracted for a follow-up, try to use the first attendee
         var person = TaskTextFormatter.formattedPerson(effective.person)
         if person == nil && effective.queue == .reachOut && meetingSession.isInMeeting {
             person = meetingSession.meetingAttendeeList.first
@@ -53,6 +93,8 @@ final class CaptureViewModel: ObservableObject {
 
     func clear() {
         input = ""
+        forcedKind = nil
+        forcedQueue = nil
         parsed = ParsedTask(rawInput: "", title: "", type: .task, queue: settings.defaultQueue, person: nil, dueDate: nil, note: nil)
     }
 
@@ -60,3 +102,4 @@ final class CaptureViewModel: ObservableObject {
         focusNonce = UUID()
     }
 }
+

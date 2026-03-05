@@ -9,6 +9,7 @@ struct CaptureView: View {
     private var isInMeeting: Bool { viewModel.meetingSession.isInMeeting }
     private var meetingTitle: String { viewModel.meetingSession.activeMeeting?.title ?? "" }
     private var isThought: Bool { viewModel.parsed.type == .thought }
+    private var hasForcedMode: Bool { viewModel.forcedKind != nil || viewModel.forcedQueue != nil }
 
     var body: some View {
         ZStack {
@@ -56,10 +57,9 @@ struct CaptureView: View {
     }
 
     private var capturePrompt: String {
-        if isInMeeting {
-            return "Note, task, follow-up..."
-        }
-        return "Type a task... (// for thought)"
+        if isInMeeting { return "Note, task, follow-up..." }
+        if viewModel.forcedKind == .thought { return "What's on your mind?" }
+        return "Type a task..."
     }
 
     private var meetingBanner: some View {
@@ -77,18 +77,43 @@ struct CaptureView: View {
     private var chipRow: some View {
         HStack(spacing: 8) {
             if isThought {
-                chip("Thought", color: .indigo)
+                modeChip("Thought", color: .indigo, isForced: viewModel.forcedKind == .thought)
             } else {
-                chip("Queue: \(viewModel.parsed.queue.displayName)", color: viewModel.parsed.queue == .work ? .orange : .blue)
+                modeChip("Queue: \(viewModel.parsed.queue.displayName)",
+                         color: viewModel.parsed.queue == .work ? .orange : .blue,
+                         isForced: viewModel.forcedQueue != nil)
                 if let date = viewModel.parsed.dueDate {
                     chip(relativeDate(date), color: .pink)
                 }
                 if let note = viewModel.parsed.note, !note.isEmpty {
-                    chip("Note", color: .teal)
-                        .help(note)
+                    chip("Note", color: .teal).help(note)
                 }
             }
+
+            if viewModel.input.isEmpty && !hasForcedMode {
+                Spacer()
+                Text("// thought  /w work  /r follow-up")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary.opacity(0.6))
+            }
         }
+    }
+
+    /// Chip that visually indicates when the value was locked in by a mode prefix
+    private func modeChip(_ text: String, color: Color, isForced: Bool) -> some View {
+        HStack(spacing: 4) {
+            if isForced {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            Text(text)
+                .font(.system(size: 12, weight: .semibold))
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 10)
+        .background(Capsule().fill(color.opacity(isForced ? 0.28 : 0.18)))
+        .overlay(Capsule().stroke(color.opacity(isForced ? 0.6 : 0.35), lineWidth: isForced ? 1.5 : 1))
+        .foregroundStyle(color.opacity(0.95))
     }
 
     private func chip(_ text: String, color: Color) -> some View {
