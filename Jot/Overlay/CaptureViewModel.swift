@@ -8,10 +8,12 @@ final class CaptureViewModel: ObservableObject {
 
     let database: DatabaseManager
     let settings: SettingsStore
+    let meetingSession: MeetingSession
 
-    init(database: DatabaseManager, settings: SettingsStore) {
+    init(database: DatabaseManager, settings: SettingsStore, meetingSession: MeetingSession) {
         self.database = database
         self.settings = settings
+        self.meetingSession = meetingSession
     }
 
     func updateParse() {
@@ -26,13 +28,25 @@ final class CaptureViewModel: ObservableObject {
         let title = TaskTextFormatter.formattedTitle(effective.title)
         guard !title.isEmpty else { return }
 
+        let isThought = effective.type == .thought
+        let kind: ItemKind = isThought ? .thought : .task
+        let meetingId = meetingSession.activeMeeting?.id
+
+        // In a meeting: if no person extracted for a follow-up, try to use the first attendee
+        var person = TaskTextFormatter.formattedPerson(effective.person)
+        if person == nil && effective.queue == .reachOut && meetingSession.isInMeeting {
+            person = meetingSession.meetingAttendeeList.first
+        }
+
         try database.createTask(
             rawInput: input,
             title: title,
-            queue: effective.queue,
-            person: TaskTextFormatter.formattedPerson(effective.person),
+            queue: isThought ? .work : effective.queue,
+            person: person,
             dueDate: effective.dueDate,
-            note: TaskTextFormatter.formattedNote(effective.note)
+            note: TaskTextFormatter.formattedNote(effective.note),
+            meetingId: meetingId,
+            kind: kind
         )
         clear()
     }

@@ -6,18 +6,24 @@ final class TaskListViewModel: ObservableObject {
         case all
         case work
         case reachOut
+        case meetings
+        case inbox
 
         var title: String {
             switch self {
             case .all: return "All"
             case .work: return "Work"
             case .reachOut: return "Follow Up"
+            case .meetings: return "Meetings"
+            case .inbox: return "Inbox"
             }
         }
     }
 
     @Published var selectedTab: Tab = .all
     @Published var tasks: [Task] = []
+    @Published var meetings: [Meeting] = []
+    @Published var thoughts: [Task] = []
     @Published var selectedTaskIDs: Set<String> = []
 
     var selectedTasks: [Task] {
@@ -95,16 +101,21 @@ final class TaskListViewModel: ObservableObject {
 
     func refresh() throws {
         tasks = try database.fetchAllTasks()
+        meetings = try database.fetchMeetings()
+        thoughts = try database.fetchThoughts()
     }
 
+    // Tasks shown in the task-based tabs (excludes thoughts)
     var visibleTasks: [Task] {
         switch selectedTab {
         case .all:
-            return tasks
+            return tasks.filter { $0.kind == .task }
         case .work:
-            return tasks.filter { $0.queue == .work }
+            return tasks.filter { $0.queue == .work && $0.kind == .task }
         case .reachOut:
-            return tasks.filter { $0.queue == .reachOut }
+            return tasks.filter { $0.queue == .reachOut && $0.kind == .task }
+        case .meetings, .inbox:
+            return []
         }
     }
 
@@ -122,6 +133,11 @@ final class TaskListViewModel: ObservableObject {
 
     var archivedTasks: [Task] {
         visibleTasks.filter { $0.status == .archived }
+    }
+
+    func tasksForMeeting(_ meeting: Meeting) -> [Task] {
+        tasks.filter { $0.meetingId == meeting.id }
+            .sorted { ($0.createdAtValue ?? .distantPast) < ($1.createdAtValue ?? .distantPast) }
     }
 
     func toggleDone(_ task: Task) {
@@ -153,6 +169,10 @@ final class TaskListViewModel: ObservableObject {
 
     func saveEdits(_ edited: Task) {
         try? database.updateTask(edited)
+    }
+
+    func deleteMeeting(_ meeting: Meeting) {
+        try? database.deleteMeeting(id: meeting.id)
     }
 
     func createTask(
