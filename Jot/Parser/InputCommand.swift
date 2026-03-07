@@ -33,19 +33,19 @@ enum InputCommandParser {
             aliases: ["/w", "/work", "/task"]
         ),
         Definition(
-            command: InputCommand(id: "reach_out", kind: .queue(.reachOut), trigger: "/r", label: "Follow Up", prompt: "Who do you need to follow up with?"),
-            aliases: ["/r", "/reach", "/followup", "/follow-up"]
+            command: InputCommand(id: "reach_out", kind: .queue(.reachOut), trigger: "/f", label: "Follow Up", prompt: "Who do you need to follow up with?"),
+            aliases: ["/f", "/r", "/follow", "/reach", "/followup", "/follow-up"]
         ),
         Definition(
             command: InputCommand(id: "thought", kind: .queue(.thought), trigger: "/n", label: "Note", prompt: "Type a note..."),
             aliases: ["/n", "/note", "/thought", "//"]
         ),
         Definition(
-            command: InputCommand(id: "meeting", kind: .meetingStart, trigger: "/meeting", label: "Meeting", prompt: "Meeting title, optionally 'with Name'"),
+            command: InputCommand(id: "meeting", kind: .meetingStart, trigger: "/meeting", label: "Meeting", prompt: "Meeting draft, optionally 'with Name'"),
             aliases: ["/m", "/meet", "/meeting"]
         ),
         Definition(
-            command: InputCommand(id: "meeting_end", kind: .meetingEnd, trigger: "/end", label: "End Meeting", prompt: "Add a summary before ending"),
+            command: InputCommand(id: "meeting_end", kind: .meetingEnd, trigger: "/end", label: "End Meeting", prompt: "Add an optional summary before ending"),
             aliases: ["/end", "/done", "/finish"]
         ),
         Definition(
@@ -93,5 +93,34 @@ enum InputCommandParser {
                 definition.aliases.contains(where: { $0.hasPrefix(token) })
             }
             .map(\.command)
+    }
+
+    static func expandedRemainder(for command: InputCommand, remainder: String) -> String {
+        let trimmed = remainder.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return trimmed }
+
+        switch command.kind {
+        case .queue(.reachOut):
+            let lower = trimmed.lowercased()
+            if lower.hasPrefix("follow up") ||
+                lower.hasPrefix("follow-up") ||
+                lower.hasPrefix("check in") ||
+                lower.hasPrefix("check-in") ||
+                lower.hasPrefix("reach out") ||
+                lower.hasPrefix("email") ||
+                lower.hasPrefix("call") ||
+                lower.hasPrefix("text") ||
+                lower.hasPrefix("ping") ||
+                lower.hasPrefix("contact") ||
+                lower.hasPrefix("message") {
+                return trimmed
+            }
+            if lower.hasPrefix("with ") {
+                return "follow up \(trimmed)"
+            }
+            return "follow up with \(trimmed)"
+        default:
+            return trimmed
+        }
     }
 }

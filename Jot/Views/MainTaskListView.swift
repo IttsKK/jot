@@ -14,8 +14,7 @@ struct MainTaskListView: View {
     @State private var selectedMetadataField: MetadataField = .main
     @State private var showStartMeetingSheet = false
     @State private var showEndMeetingSheet = false
-    @State private var meetingTitleInput: String = ""
-    @State private var meetingPersonInput: String = ""
+    @State private var meetingDraftInput: String = ""
     @State private var meetingSummaryInput: String = ""
     @State private var taskDetailDraft: TaskDetailDraft? = nil
     @State private var selectedInboxThoughtID: String? = nil
@@ -629,7 +628,7 @@ struct MainTaskListView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Start Meeting")
                         .font(.system(size: 22, weight: .bold, design: .rounded))
-                    Text("Use the same format as quick capture: a title and who it's with.")
+                    Text("Use one flexible field: `Tyler`, `Product roadmap`, or `Product roadmap with Tyler`.")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
@@ -644,20 +643,13 @@ struct MainTaskListView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Meeting title")
+                Text("Meeting")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.secondary)
-                meetingInputField("Planning", text: $meetingTitleInput)
+                meetingInputField("Product roadmap with Tyler", text: $meetingDraftInput)
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("With")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.secondary)
-                meetingInputField("Sarah", text: $meetingPersonInput)
-            }
-
-            Text("Quick capture equivalent: `/m Planning with Sarah`")
+            Text("Quick capture equivalent: `/m Product roadmap with Tyler`")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.tertiary)
 
@@ -673,7 +665,7 @@ struct MainTaskListView: View {
                 .background(Capsule().fill(Color.accentColor))
                 .foregroundStyle(.white)
                 .keyboardShortcut(.defaultAction)
-                .disabled(meetingTitleInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(meetingDraftInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(20)
@@ -687,7 +679,7 @@ struct MainTaskListView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("End Meeting")
                         .font(.system(size: 22, weight: .bold, design: .rounded))
-                    Text("Add a short summary before ending the meeting.")
+                    Text("Add an optional summary before ending the meeting.")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
@@ -702,7 +694,7 @@ struct MainTaskListView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Summary")
+                Text("Summary (Optional)")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.secondary)
 
@@ -742,8 +734,7 @@ struct MainTaskListView: View {
     }
 
     private func openStartMeetingSheet() {
-        meetingTitleInput = ""
-        meetingPersonInput = ""
+        meetingDraftInput = ""
         showStartMeetingSheet = true
     }
 
@@ -753,11 +744,10 @@ struct MainTaskListView: View {
     }
 
     private func startMeeting() {
-        let title = TaskTextFormatter.formattedTitle(meetingTitleInput)
-        guard !title.isEmpty else { return }
-        let person = TaskTextFormatter.formattedPerson(meetingPersonInput)
+        let draft = MeetingDraftParser.parse(meetingDraftInput)
+        guard !draft.title.isEmpty else { return }
 
-        try? meetingSession.startMeeting(title: title, attendees: person)
+        try? meetingSession.startMeeting(title: draft.title, attendees: draft.person)
         if let active = meetingSession.activeMeeting {
             viewModel.selectedItem = .meeting(active.id)
         }
@@ -1176,11 +1166,11 @@ struct MainTaskListView: View {
 
             HStack(spacing: 8) {
                 if composer.command?.kind == .meetingStart {
-                    Text("Enter the meeting title, optionally with 'with Name'")
+                    Text("Enter a meeting draft like 'Tyler' or 'Product roadmap with Tyler'")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.purple.opacity(0.88))
                 } else if composer.command?.kind == .meetingEnd {
-                    Text("Add a summary, then press Return to end the meeting")
+                    Text("Add an optional summary, then press Return to end the meeting")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.purple.opacity(0.88))
                 } else if composer.command?.kind == .meetingSummary {
@@ -2118,10 +2108,11 @@ struct MainTaskListView: View {
                 if case let .queue(queue) = consumed.command.kind {
                     composer.queue = queue
                 }
-                if metadataEditorInput != consumed.remainder {
-                    metadataEditorInput = consumed.remainder
+                let expandedRemainder = InputCommandParser.expandedRemainder(for: consumed.command, remainder: consumed.remainder)
+                if metadataEditorInput != expandedRemainder {
+                    metadataEditorInput = expandedRemainder
                 }
-                composer.rawInput = consumed.remainder
+                composer.rawInput = expandedRemainder
                 return
             }
             composer.rawInput = metadataEditorInput

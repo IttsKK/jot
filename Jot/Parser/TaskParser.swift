@@ -26,7 +26,16 @@ enum TaskParser {
         var working = raw
         let leadingMode = consumeLeadingModePrefix(from: working)
         if let leadingMode {
-            working = leadingMode.remainder
+            working = InputCommandParser.expandedRemainder(
+                for: InputCommand(
+                    id: "",
+                    kind: .queue(leadingMode.queue),
+                    trigger: "",
+                    label: "",
+                    prompt: ""
+                ),
+                remainder: leadingMode.remainder
+            )
             if leadingMode.queue == .thought {
                 let title = cleanupTitle(working)
                 return ParsedTask(

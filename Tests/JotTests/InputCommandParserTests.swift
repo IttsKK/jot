@@ -26,10 +26,18 @@ final class InputCommandParserTests: XCTestCase {
     }
 
     func testConsumesAliasesCaseInsensitively() {
-        let consumed = InputCommandParser.consumeLeadingCommand(from: "   /R ping Chris")
+        let consumed = InputCommandParser.consumeLeadingCommand(from: "   /F ping Chris")
         XCTAssertNotNil(consumed)
         XCTAssertEqual(consumed?.remainder, "ping Chris")
         XCTAssertEqual(consumed?.command.kind, .queue(.reachOut))
+    }
+
+    func testExpandsFollowUpCommandRemainder() {
+        let command = InputCommand(id: "reach_out", kind: .queue(.reachOut), trigger: "/f", label: "Follow Up", prompt: "")
+        XCTAssertEqual(
+            InputCommandParser.expandedRemainder(for: command, remainder: "Bob wednesday"),
+            "follow up with Bob wednesday"
+        )
     }
 
     func testUnknownCommandIsIgnored() {

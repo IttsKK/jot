@@ -82,36 +82,24 @@ final class StatusBarController: NSObject {
     @objc private func startMeeting() {
         let alert = NSAlert()
         alert.messageText = "Start Meeting"
-        alert.informativeText = "Enter a meeting title and who it's with (optional)."
+        alert.informativeText = "Enter a single meeting draft like 'Tyler' or 'Product roadmap with Tyler'."
         alert.addButton(withTitle: "Start")
         alert.addButton(withTitle: "Cancel")
 
-        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 300, height: 56))
-        stack.orientation = .vertical
-        stack.spacing = 8
-
-        let titleField = NSTextField(frame: NSRect(x: 0, y: 28, width: 300, height: 24))
-        titleField.placeholderString = "Meeting title"
-        titleField.bezelStyle = .roundedBezel
-
-        let attendeesField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-        attendeesField.placeholderString = "With (optional)"
-        attendeesField.bezelStyle = .roundedBezel
-
-        stack.addArrangedSubview(titleField)
-        stack.addArrangedSubview(attendeesField)
-        alert.accessoryView = stack
-        alert.window.initialFirstResponder = titleField
+        let draftField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        draftField.placeholderString = "Product roadmap with Tyler"
+        draftField.bezelStyle = .roundedBezel
+        alert.accessoryView = draftField
+        alert.window.initialFirstResponder = draftField
 
         NSApp.activate(ignoringOtherApps: true)
         let response = alert.runModal()
         guard response == .alertFirstButtonReturn else { return }
 
-        let title = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return }
-        let attendees = attendeesField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let draft = MeetingDraftParser.parse(draftField.stringValue)
+        guard !draft.title.isEmpty else { return }
 
-        try? meetingSession.startMeeting(title: title, attendees: attendees.isEmpty ? nil : attendees)
+        try? meetingSession.startMeeting(title: draft.title, attendees: draft.person)
         rebuildMenu()
     }
 

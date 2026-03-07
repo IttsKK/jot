@@ -47,6 +47,15 @@ final class TaskParserTests: XCTestCase {
         XCTAssertEqual(parsed.title, "idea to revisit")
     }
 
+    func testFollowUpCommandExpandsIntoFollowUpTitleAndDate() {
+        let parsed = TaskParser.parse("/f Bob wednesday", now: baselineNow, calendar: calendar)
+        XCTAssertEqual(parsed.queue, .reachOut)
+        XCTAssertEqual(parsed.type, .followUp)
+        XCTAssertEqual(parsed.person, "Bob")
+        XCTAssertEqual(parsed.title, "follow up with Bob")
+        XCTAssertEqual(dayString(parsed.dueDate), "2026-03-04")
+    }
+
     func testDateExtractionAndTitleCleanup() {
         let parsed = TaskParser.parse("send update by tomorrow", now: baselineNow, calendar: calendar)
         XCTAssertEqual(parsed.title, "send update")

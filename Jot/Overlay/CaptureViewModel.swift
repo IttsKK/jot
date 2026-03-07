@@ -19,6 +19,16 @@ final class CaptureViewModel: ObservableObject {
     let meetingSession: MeetingSession
     private var commandSuggestionsForced = false
 
+    private var trimmedInput: String {
+        input.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isTypingCommandPrefix: Bool {
+        guard !trimmedInput.isEmpty else { return false }
+        guard trimmedInput.first == "/" else { return false }
+        return !trimmedInput.contains(where: \.isWhitespace)
+    }
+
     init(database: DatabaseManager, settings: SettingsStore, meetingSession: MeetingSession) {
         self.database = database
         self.settings = settings
@@ -27,7 +37,15 @@ final class CaptureViewModel: ObservableObject {
 
     var showChips: Bool {
         guard activeCommand == nil else { return false }
-        return !input.isEmpty || lockedQueue != nil || addToToday
+        if addToToday { return true }
+        if isTypingCommandPrefix { return false }
+
+        if let lockedQueue {
+            guard lockedQueue != .thought else { return false }
+            return parsed.dueDate != nil || !(parsed.note?.isEmpty ?? true)
+        }
+
+        return !trimmedInput.isEmpty
     }
 
     func updateParse() {
@@ -65,7 +83,7 @@ final class CaptureViewModel: ObservableObject {
     @discardableResult
     private func consumeNextCommand() -> Bool {
         if let consumed = InputCommandParser.consumeLeadingCommand(from: input) {
-            input = consumed.remainder
+            input = InputCommandParser.expandedRemainder(for: consumed.command, remainder: consumed.remainder)
             switch consumed.command.kind {
             case let .queue(queue):
                 lockedQueue = queue
@@ -172,7 +190,7 @@ final class CaptureViewModel: ObservableObject {
         case .meetingStart, .meetingEnd, .meetingSummary:
             activeCommand = command
         }
-        input = remainder
+        input = InputCommandParser.expandedRemainder(for: command, remainder: remainder)
         updateParse()
     }
 

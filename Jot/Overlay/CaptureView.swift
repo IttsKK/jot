@@ -13,6 +13,7 @@ struct CaptureView: View {
     private var activeCommand: InputCommand? { viewModel.activeCommand }
     private var isThought: Bool { viewModel.lockedQueue == .thought || viewModel.parsed.queue == .thought }
     private var hasLockedMode: Bool { viewModel.lockedQueue != nil }
+    private var shouldShowQueueModeChip: Bool { !hasLockedMode }
     private var commandSuggestions: [InputCommand] { InputCommandParser.suggestedCommands(for: viewModel.input) }
 
     var body: some View {
@@ -155,12 +156,15 @@ struct CaptureView: View {
                 todayToggle
             }
 
-            if isThought {
+            if isThought, shouldShowQueueModeChip {
                 modeChip("Note", color: .indigo, isForced: viewModel.lockedQueue == .thought)
-            } else {
+            } else if shouldShowQueueModeChip {
                 modeChip("Queue: \(viewModel.parsed.queue.displayName)",
                          color: queueColor(viewModel.parsed.queue),
                          isForced: hasLockedMode)
+            }
+
+            if !isThought {
                 if let date = viewModel.parsed.dueDate {
                     chip(relativeDate(date), color: .pink)
                 }
