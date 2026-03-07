@@ -78,7 +78,7 @@ final class NotificationManager: NSObject {
 
         for task in tasks {
             guard let due = task.dueDateValue else { continue }
-            if calendar.isDate(due, inSameDayAs: today) {
+            if calendar.isDate(due, inSameDayAs: today), due <= now {
                 let key = "reachout|\(task.id)|\(dayKey(today, calendar: calendar))"
                 if sent.contains(key) { continue }
 

@@ -67,8 +67,20 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(Int(openAppHotKeyModifiers), forKey: UserDefaultKeys.openAppHotKeyModifiers); notify() }
     }
 
+    @Published var dailyFocusHotKeyCode: UInt32 {
+        didSet { defaults.set(Int(dailyFocusHotKeyCode), forKey: UserDefaultKeys.dailyFocusHotKeyCode); notify() }
+    }
+
+    @Published var dailyFocusHotKeyModifiers: UInt32 {
+        didSet { defaults.set(Int(dailyFocusHotKeyModifiers), forKey: UserDefaultKeys.dailyFocusHotKeyModifiers); notify() }
+    }
+
     @Published var overlayPosition: OverlayPosition {
         didSet { defaults.set(overlayPosition.rawValue, forKey: UserDefaultKeys.overlayPosition); notify() }
+    }
+
+    @Published var quickCaptureCommandPreviewEnabled: Bool {
+        didSet { defaults.set(quickCaptureCommandPreviewEnabled, forKey: UserDefaultKeys.quickCaptureCommandPreviewEnabled); notify() }
     }
 
     @Published var notificationsEnabled: Bool {
@@ -120,10 +132,17 @@ final class SettingsStore: ObservableObject {
         let openCode = defaults.object(forKey: UserDefaultKeys.openAppHotKeyCode) as? Int
         let openModifiers = defaults.object(forKey: UserDefaultKeys.openAppHotKeyModifiers) as? Int
         openAppHotKeyCode = UInt32(openCode ?? 49)
-        openAppHotKeyModifiers = UInt32(openModifiers ?? (controlKey | optionKey))
+        openAppHotKeyModifiers = UInt32(openModifiers ?? (optionKey | shiftKey))
+
+        let focusCode = defaults.object(forKey: UserDefaultKeys.dailyFocusHotKeyCode) as? Int
+        let focusModifiers = defaults.object(forKey: UserDefaultKeys.dailyFocusHotKeyModifiers) as? Int
+        dailyFocusHotKeyCode = UInt32(focusCode ?? 49) // space
+        dailyFocusHotKeyModifiers = UInt32(focusModifiers ?? (controlKey | optionKey))
 
         let rawOverlay = defaults.string(forKey: UserDefaultKeys.overlayPosition)
         overlayPosition = OverlayPosition(rawValue: rawOverlay ?? OverlayPosition.upperThird.rawValue) ?? .upperThird
+
+        quickCaptureCommandPreviewEnabled = defaults.object(forKey: UserDefaultKeys.quickCaptureCommandPreviewEnabled) as? Bool ?? true
 
         notificationsEnabled = defaults.object(forKey: UserDefaultKeys.notificationsEnabled) as? Bool ?? true
         summaryEnabled = defaults.object(forKey: UserDefaultKeys.summaryEnabled) as? Bool ?? true

@@ -2,25 +2,15 @@ import Foundation
 
 @MainActor
 final class TaskListViewModel: ObservableObject {
-    enum Tab: String, CaseIterable {
+    enum SidebarItem: Hashable {
         case all
         case work
-        case reachOut
-        case meetings
+        case followUp
         case inbox
-
-        var title: String {
-            switch self {
-            case .all: return "All"
-            case .work: return "Work"
-            case .reachOut: return "Follow Up"
-            case .meetings: return "Meetings"
-            case .inbox: return "Inbox"
-            }
-        }
+        case meeting(String)
     }
 
-    @Published var selectedTab: Tab = .all
+    @Published var selectedItem: SidebarItem = .all
     @Published var tasks: [Task] = []
     @Published var meetings: [Meeting] = []
     @Published var thoughts: [Task] = []
@@ -77,13 +67,13 @@ final class TaskListViewModel: ObservableObject {
         thoughts = try database.fetchThoughts()
     }
 
-    // Actionable tasks shown in the task-based tabs (excludes thoughts, which live in Inbox)
     var visibleTasks: [Task] {
-        switch selectedTab {
-        case .all:     return tasks.filter { $0.queue == .work || $0.queue == .reachOut }
-        case .work:    return tasks.filter { $0.queue == .work }
-        case .reachOut: return tasks.filter { $0.queue == .reachOut }
-        case .meetings, .inbox: return []
+        switch selectedItem {
+        case .all:      return tasks.filter { $0.queue == .work || $0.queue == .reachOut }
+        case .work:     return tasks.filter { $0.queue == .work }
+        case .followUp: return tasks.filter { $0.queue == .reachOut }
+        case .inbox:    return []
+        case .meeting:  return []
         }
     }
 
@@ -98,6 +88,11 @@ final class TaskListViewModel: ObservableObject {
     }
 
     var archivedTasks: [Task] { visibleTasks.filter { $0.status == .archived } }
+
+    var selectedMeeting: Meeting? {
+        guard case .meeting(let id) = selectedItem else { return nil }
+        return meetings.first(where: { $0.id == id })
+    }
 
     func tasksForMeeting(_ meeting: Meeting) -> [Task] {
         tasks.filter { $0.meetingId == meeting.id }
@@ -114,9 +109,15 @@ final class TaskListViewModel: ObservableObject {
 
     func saveEdits(_ edited: Task) { try? database.updateTask(edited) }
     func deleteMeeting(_ meeting: Meeting) { try? database.deleteMeeting(id: meeting.id) }
+    func updateMeetingSummary(_ meeting: Meeting, summary: String?) {
+        var edited = meeting
+        edited.summary = summary
+        try? database.updateMeeting(edited)
+    }
+    func addTaskToDailyFocus(_ task: Task) { try? database.setTaskDailyFocus(id: task.id) }
 
-    func createTask(rawInput: String, title: String, queue: TaskQueue, person: String?, dueDate: Date?, note: String?) {
-        _ = try? database.createTask(rawInput: rawInput, title: title, queue: queue, person: person, dueDate: dueDate, note: note)
+    func createTask(rawInput: String, title: String, queue: TaskQueue, person: String?, dueDate: Date?, note: String?, meetingId: String? = nil, dailyFocusDate: String? = nil) {
+        _ = try? database.createTask(rawInput: rawInput, title: title, queue: queue, person: person, dueDate: dueDate, note: note, meetingId: meetingId, dailyFocusDate: dailyFocusDate)
     }
 
     func updateTask(id: String, rawInput: String, title: String, queue: TaskQueue, status: TaskStatus, person: String?, dueDate: Date?, note: String?) {
@@ -152,6 +153,14 @@ final class TaskListViewModel: ObservableObject {
             reordered.append(movingTask)
         }
         try? database.reorderTask(queue: movingTask.queue, orderedIDs: reordered.map(\.id))
+        try? refresh()
+    }
+
+    func moveThought(from source: IndexSet, to destination: Int) {
+        var mutableThoughts = thoughts
+        mutableThoughts.move(fromOffsets: source, toOffset: destination)
+        let orderedIDs = mutableThoughts.map(\.id)
+        try? database.reorderTask(queue: .thought, orderedIDs: orderedIDs)
         try? refresh()
     }
 }

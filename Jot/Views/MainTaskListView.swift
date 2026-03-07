@@ -4,18 +4,28 @@ struct MainTaskListView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var settings: SettingsStore
     @ObservedObject private var meetingSession: MeetingSession
+    @AppStorage(UserDefaultKeys.mainSidebarWidth) private var storedSidebarWidth: Double = 220
+    @AppStorage(UserDefaultKeys.mainSidebarCollapsed) private var isSidebarCollapsed = false
     @StateObject private var viewModel: TaskListViewModel
     @State private var archiveExpanded = false
     @State private var composer: TaskComposerState
     @State private var showDeleteConfirmation = false
+    @State private var isComposerInputHovering = false
     @State private var selectedMetadataField: MetadataField = .main
-    @State private var selectedMeeting: Meeting? = nil
+    @State private var showStartMeetingSheet = false
+    @State private var showEndMeetingSheet = false
+    @State private var meetingTitleInput: String = ""
+    @State private var meetingPersonInput: String = ""
+    @State private var meetingSummaryInput: String = ""
+    @State private var taskDetailDraft: TaskDetailDraft? = nil
+    @State private var selectedInboxThoughtID: String? = nil
+    @State private var thoughtEditorText: String = ""
     @State private var metadataEditorInput: String = ""
+    @State private var sidebarDragStartWidth: CGFloat?
     @FocusState private var focusedComposerField: ComposerField?
 
     private enum ComposerField: Hashable {
         case main
-        case auxiliary
     }
 
     private enum MetadataField: Hashable {
@@ -38,8 +48,8 @@ struct MainTaskListView: View {
         var placeholder: String {
             switch self {
             case .main: return "Type your task..."
-            case .queue: return "work or follow up"
-            case .due: return "tomorrow, next week thursday, mar 5..."
+            case .queue: return "work, follow up, or note"
+            case .due: return "tomorrow at 12, in 12 hours, mar 5..."
             case .note: return "extra context..."
             case .status: return "active, done, archived"
             }
@@ -53,39 +63,19 @@ struct MainTaskListView: View {
         _composer = State(initialValue: TaskComposerState.capture(defaultQueue: settings.defaultQueue))
     }
 
+    // MARK: - Body
+
     var body: some View {
-        ZStack {
-            backgroundLayer
+        HStack(spacing: 0) {
+            sidebar
+                .frame(width: currentSidebarWidth)
 
-            VStack(spacing: 14) {
-                topPanel
+            sidebarResizeHandle
 
-                if viewModel.selectedTab == .meetings {
-                    meetingsPanel
-                } else if viewModel.selectedTab == .inbox {
-                    inboxPanel
-                } else {
-                    if viewModel.visibleTasks.isEmpty {
-                        emptyStatePanel
-                    } else {
-                        if viewModel.isMultiSelect {
-                            bulkActionsBar
-                                .transition(.opacity.combined(with: .move(edge: .top)))
-                        }
-                        taskListPanel
-                    }
-
-                    if let task = singleSelectedTask {
-                        taskDetailsPanel(task: task)
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    }
-
-                    composerPanel
-                }
-            }
-            .animation(.easeOut(duration: 0.18), value: singleSelectedTask?.id)
-            .padding(20)
+            contentPanel
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .background(backgroundLayer)
         .background(
             MainPromptKeyMonitor(
                 onEscape: { handleEscape() },
@@ -93,22 +83,57 @@ struct MainTaskListView: View {
                 onTab: { reverse in cycleMetadataField(reverse: reverse) },
                 onArrowUp: { handleListArrowUp() },
                 onArrowDown: { handleListArrowDown() },
-                onArrowLeft: { handleArrowLeft() },
-                onArrowRight: { handleArrowRight() },
                 onEnter: { handleListEnter() },
                 onSpace: { handleListSpace() },
                 onDelete: { handleListDelete() },
                 onSelectAll: { handleSelectAll() }
             )
         )
+        .background(keyboardShortcutButtons)
         .task {
             try? viewModel.refresh()
+            syncTaskDetailDraftFromSelection(force: true)
         }
         .onChange(of: viewModel.tasks) { _, _ in
             viewModel.validateSelection()
+            syncTaskDetailDraftFromSelection()
         }
-        .onChange(of: viewModel.selectedTab) { _, _ in
+        .onChange(of: viewModel.selectedTaskIDs) { _, _ in
+            syncTaskDetailDraftFromSelection(force: true)
+        }
+        .onChange(of: viewModel.selectedItem) { _, newItem in
             viewModel.validateSelection()
+            if newItem != .inbox {
+                selectedInboxThoughtID = nil
+            }
+            if let queue = defaultComposerQueue(for: newItem) {
+                composer.queue = queue
+                composer.command = nil
+                if selectedMetadataField == .queue || selectedMetadataField == .main {
+                    syncMetadataEditorInputFromSelection()
+                }
+            }
+        }
+        .onChange(of: viewModel.meetings) { _, meetings in
+            if case .meeting(let id) = viewModel.selectedItem {
+                if !meetings.contains(where: { $0.id == id }) {
+                    viewModel.selectedItem = .all
+                }
+            }
+        }
+        .onChange(of: viewModel.thoughts) { _, thoughts in
+            if let selectedInboxThoughtID {
+                if thoughts.first(where: { $0.id == selectedInboxThoughtID }) == nil {
+                    self.selectedInboxThoughtID = nil
+                    thoughtEditorText = ""
+                }
+            }
+        }
+        .sheet(isPresented: $showStartMeetingSheet) {
+            startMeetingSheet
+        }
+        .sheet(isPresented: $showEndMeetingSheet) {
+            endMeetingSheet
         }
         .alert("Delete \(viewModel.selectedTaskIDs.count) tasks?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) { viewModel.bulkDelete() }
@@ -116,6 +141,24 @@ struct MainTaskListView: View {
         } message: {
             Text("This action cannot be undone.")
         }
+    }
+
+    // Hidden buttons to register keyboard shortcuts
+    private var keyboardShortcutButtons: some View {
+        Group {
+            Button("") { withAnimation(.easeInOut(duration: 0.15)) { viewModel.selectedItem = .all } }
+                .keyboardShortcut("1", modifiers: .command)
+            Button("") { withAnimation(.easeInOut(duration: 0.15)) { viewModel.selectedItem = .work } }
+                .keyboardShortcut("2", modifiers: .command)
+            Button("") { withAnimation(.easeInOut(duration: 0.15)) { viewModel.selectedItem = .followUp } }
+                .keyboardShortcut("3", modifiers: .command)
+            Button("") { withAnimation(.easeInOut(duration: 0.15)) { viewModel.selectedItem = .inbox } }
+                .keyboardShortcut("4", modifiers: .command)
+            Button("") { AppContext.shared.openDailyFocusWindow() }
+                .keyboardShortcut("5", modifiers: .command)
+        }
+        .frame(width: 0, height: 0)
+        .opacity(0)
     }
 
     private var backgroundLayer: some View {
@@ -129,167 +172,289 @@ struct MainTaskListView: View {
         .ignoresSafeArea()
     }
 
-    private var topPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Jot")
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
+    private let sidebarMinWidth: CGFloat = 180
+    private let sidebarMaxWidth: CGFloat = 340
+    private let collapsedSidebarWidth: CGFloat = 56
 
-                    Text(meetingSession.isInMeeting ? "In meeting: \(meetingSession.activeMeeting?.title ?? "")" : "Keep work and follow ups moving")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(meetingSession.isInMeeting ? Color.purple.opacity(0.85) : .secondary)
-                }
+    private var currentSidebarWidth: CGFloat {
+        isSidebarCollapsed ? collapsedSidebarWidth : CGFloat(storedSidebarWidth)
+    }
 
-                Spacer()
-            }
+    // MARK: - Sidebar
 
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                tabButton(.all, shortcut: "1")
-                tabButton(.work, shortcut: "2")
-                tabButton(.reachOut, shortcut: "3")
-                tabButton(.meetings, shortcut: "4")
-                tabButton(.inbox, shortcut: "5")
+                if !isSidebarCollapsed {
+                    Text("Jot")
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                }
+
+                Spacer()
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        if !isSidebarCollapsed {
+                            storedSidebarWidth = Double(currentSidebarWidth)
+                        }
+                        isSidebarCollapsed.toggle()
+                    }
+                } label: {
+                    Image(systemName: isSidebarCollapsed ? "sidebar.left" : "sidebar.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.primary.opacity(0.06)))
+                }
+                .buttonStyle(.plain)
+                .help(isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar")
+            }
+            .padding(.horizontal, isSidebarCollapsed ? 10 : 16)
+            .padding(.top, 16)
+            .padding(.bottom, 4)
+
+            if meetingSession.isInMeeting, let meeting = meetingSession.activeMeeting {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        viewModel.selectedItem = .meeting(meeting.id)
+                    }
+                } label: {
+                    if isSidebarCollapsed {
+                        Circle().fill(.red).frame(width: 10, height: 10)
+                            .frame(width: 36, height: 28)
+                    } else {
+                        HStack(spacing: 6) {
+                            Circle().fill(.red).frame(width: 6, height: 6)
+                            Text(meeting.title)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, isSidebarCollapsed ? 10 : 16)
+                .padding(.bottom, 4)
+                .help(meeting.title)
+            }
+
+            Spacer().frame(height: 12)
+
+            // Queue section
+            if !isSidebarCollapsed {
+                sidebarSectionHeader("Queues")
+            }
+            sidebarRow(item: .all, icon: "tray.full", title: "All", color: .primary)
+            sidebarRow(item: .work, icon: "checkmark.square", title: "Work", color: .orange)
+            sidebarRow(item: .followUp, icon: "arrowshape.turn.up.right", title: "Follow Up", color: .blue)
+            sidebarRow(item: .inbox, icon: "note.text", title: "Notes", color: .indigo)
+
+            Spacer().frame(height: 20)
+
+            // Meetings section
+            HStack {
+                if !isSidebarCollapsed {
+                    sidebarSectionHeader("Meetings")
+                    Spacer()
+                }
+
+                Button { openStartMeetingSheet() } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, isSidebarCollapsed ? 18 : 16)
+                .help("Start Meeting")
+            }
+
+            if viewModel.meetings.isEmpty {
+                if !isSidebarCollapsed {
+                    Text("No meetings yet")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                }
+            } else {
+                ScrollView {
+                    VStack(spacing: 1) {
+                        ForEach(viewModel.meetings) { meeting in
+                            sidebarMeetingRow(meeting)
+                        }
+                    }
+                }
+                .frame(maxHeight: .infinity)
+            }
+
+            if viewModel.meetings.isEmpty {
                 Spacer()
             }
-        }
-        .padding(16)
-        .background(glassPanel(cornerRadius: 16))
-        .shadow(color: Color.black.opacity(0.06), radius: 12, y: 5)
-    }
 
-    private var meetingsPanel: some View {
-        HStack(spacing: 16) {
-            // Meeting list sidebar
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Meetings")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 14)
-                    .padding(.bottom, 8)
+            Divider().padding(.horizontal, 12)
 
-                if viewModel.meetings.isEmpty {
-                    VStack(spacing: 10) {
-                        Image(systemName: "video.slash")
-                            .font(.system(size: 28))
-                            .foregroundStyle(.secondary)
-                        Text("No meetings yet")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        Text("Start a meeting from the menu bar")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.tertiary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding()
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 6) {
-                            ForEach(viewModel.meetings) { meeting in
-                                meetingRow(meeting)
-                            }
+            // Today Focus
+            Button {
+                AppContext.shared.openDailyFocusWindow()
+            } label: {
+                Group {
+                    if isSidebarCollapsed {
+                        Image(systemName: "sun.max.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.orange)
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        HStack(spacing: 8) {
+                            Image(systemName: "sun.max.fill")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.orange)
+                        Text("Today Focus")
+                            .font(.system(size: 13, weight: .medium))
+                            Spacer()
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.bottom, 10)
                     }
                 }
+                .padding(.horizontal, isSidebarCollapsed ? 0 : 12)
+                .padding(.vertical, isSidebarCollapsed ? 10 : 8)
+                .contentShape(Rectangle())
             }
-            .frame(width: 240)
-            .frame(maxHeight: .infinity)
-            .background(glassPanel(cornerRadius: 16))
-            .shadow(color: Color.black.opacity(0.05), radius: 12, y: 5)
-
-            // Meeting detail
-            Group {
-                if let meeting = selectedMeeting ?? viewModel.meetings.first(where: { $0.isActive }) ?? viewModel.meetings.first {
-                    MeetingDetailView(
-                        meeting: meeting,
-                        items: viewModel.tasksForMeeting(meeting),
-                        onToggleDone: { viewModel.toggleDone($0) },
-                        onDelete: { viewModel.delete($0) }
-                    )
-                } else {
-                    VStack(spacing: 12) {
-                        Image(systemName: "note.text")
-                            .font(.system(size: 36))
-                            .foregroundStyle(.secondary)
-                        Text("Select a meeting")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(glassPanel(cornerRadius: 16))
-            .shadow(color: Color.black.opacity(0.05), radius: 12, y: 5)
+            .buttonStyle(.plain)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+            .help("Open Today Focus")
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(sidebarBackgroundColor.ignoresSafeArea())
+        .animation(.easeInOut(duration: 0.18), value: isSidebarCollapsed)
     }
 
-    private func meetingRow(_ meeting: Meeting) -> some View {
-        let isSelected = selectedMeeting?.id == meeting.id
+    private func sidebarSectionHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.system(size: 10, weight: .bold))
+            .kerning(0.8)
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 6)
+    }
+
+    private func sidebarRow(item: TaskListViewModel.SidebarItem, icon: String, title: String, color: Color) -> some View {
+        let isSelected = viewModel.selectedItem == item
+        let count = sidebarCount(for: item)
+
         return Button {
-            selectedMeeting = meeting
+            withAnimation(.easeInOut(duration: 0.15)) {
+                viewModel.selectedItem = item
+            }
         } label: {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
+            Group {
+                if isSidebarCollapsed {
+                    Image(systemName: icon)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(isSelected ? .white : color == .primary ? .secondary : color)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    HStack(spacing: 10) {
+                        Image(systemName: icon)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(isSelected ? .white : color == .primary ? .secondary : color)
+                            .frame(width: 20)
+
+                    Text(title)
+                        .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                        .foregroundStyle(isSelected ? .white : .primary)
+
+                        Spacer()
+
+                        if count > 0 {
+                            Text("\(count)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, isSidebarCollapsed ? 0 : 10)
+            .padding(.vertical, isSidebarCollapsed ? 10 : 6)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(isSelected ? Color.accentColor : Color.clear)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+        .help(title)
+    }
+
+    private func sidebarMeetingRow(_ meeting: Meeting) -> some View {
+        let isSelected = viewModel.selectedItem == .meeting(meeting.id)
+        let count = viewModel.tasksForMeeting(meeting).count
+
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                viewModel.selectedItem = .meeting(meeting.id)
+            }
+        } label: {
+            Group {
+                if isSidebarCollapsed {
+                    if meeting.isActive {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 10, height: 10)
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(isSelected ? .white : .secondary)
+                            .frame(maxWidth: .infinity)
+                    }
+                } else {
+                    HStack(spacing: 10) {
                         if meeting.isActive {
                             Circle()
                                 .fill(Color.red)
-                                .frame(width: 7, height: 7)
+                                .frame(width: 8, height: 8)
+                                .frame(width: 20)
+                        } else {
+                            Image(systemName: "doc.text")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(isSelected ? .white : .secondary)
+                                .frame(width: 20)
                         }
+
                         Text(meeting.title)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(isSelected ? Color.blue.opacity(0.95) : .primary)
+                            .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                            .foregroundStyle(isSelected ? .white : .primary)
                             .lineLimit(1)
+
+                        Spacer()
+
+                        if count > 0 {
+                            Text("\(count)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
+                        }
                     }
-
-                    if let start = meeting.startedAtValue {
-                        Text(shortDateFormatter.string(from: start))
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if !meeting.attendeeList.isEmpty {
-                        Text(meeting.attendeeList.joined(separator: ", "))
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer()
-
-                let count = viewModel.tasksForMeeting(meeting).count
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 11, weight: .bold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(Color.blue.opacity(0.15)))
-                        .foregroundStyle(Color.blue.opacity(0.8))
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.horizontal, isSidebarCollapsed ? 0 : 10)
+            .padding(.vertical, isSidebarCollapsed ? 10 : 6)
             .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(isSelected ? Color.blue.opacity(0.12) : Color.clear)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(isSelected ? Color.blue.opacity(0.25) : Color.clear, lineWidth: 1)
-                    )
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(isSelected ? Color.accentColor : Color.clear)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 10))
+            .contentShape(RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+        .help(meeting.title)
         .contextMenu {
+            if meeting.isActive {
+                Button("End Meeting") {
+                    try? meetingSession.endCurrentMeeting()
+                }
+            }
             Button(role: .destructive) {
-                if selectedMeeting?.id == meeting.id { selectedMeeting = nil }
                 viewModel.deleteMeeting(meeting)
             } label: {
                 Label("Delete Meeting", systemImage: "trash")
@@ -297,103 +462,491 @@ struct MainTaskListView: View {
         }
     }
 
-    private var shortDateFormatter: DateFormatter {
-        let f = DateFormatter()
-        f.dateStyle = .short
-        f.timeStyle = .short
-        return f
+    private func sidebarCount(for item: TaskListViewModel.SidebarItem) -> Int {
+        switch item {
+        case .all:
+            return viewModel.tasks.filter { ($0.queue == .work || $0.queue == .reachOut) && $0.status == .active }.count
+        case .work:
+            return viewModel.tasks.filter { $0.queue == .work && $0.status == .active }.count
+        case .followUp:
+            return viewModel.tasks.filter { $0.queue == .reachOut && $0.status == .active }.count
+        case .inbox:
+            return viewModel.thoughts.count
+        case .meeting(let id):
+            return viewModel.tasks.filter { $0.meetingId == id }.count
+        }
     }
+
+    private var sidebarBackgroundColor: Color {
+        colorScheme == .dark
+            ? Color(red: 0.09, green: 0.09, blue: 0.11)
+            : Color(red: 0.93, green: 0.94, blue: 0.96)
+    }
+
+    private var sidebarResizeHandle: some View {
+        Rectangle()
+            .fill(Color.clear)
+            .frame(width: isSidebarCollapsed ? 1 : 8)
+            .overlay(alignment: .center) {
+                Rectangle()
+                    .fill(panelStrokeColor.opacity(isSidebarCollapsed ? 0.5 : 1))
+                    .frame(width: 1)
+            }
+            .contentShape(Rectangle())
+            .gesture(sidebarResizeGesture)
+            .onHover { hovering in
+                if hovering {
+                    NSCursor.resizeLeftRight.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+    }
+
+    private var sidebarResizeGesture: some Gesture {
+        DragGesture(minimumDistance: 2)
+            .onChanged { value in
+                if sidebarDragStartWidth == nil {
+                    sidebarDragStartWidth = currentSidebarWidth
+                    if isSidebarCollapsed {
+                        isSidebarCollapsed = false
+                        sidebarDragStartWidth = CGFloat(storedSidebarWidth)
+                    }
+                }
+
+                let start = sidebarDragStartWidth ?? CGFloat(storedSidebarWidth)
+                let proposed = min(max(start + value.translation.width, sidebarMinWidth), sidebarMaxWidth)
+                storedSidebarWidth = Double(proposed)
+            }
+            .onEnded { _ in
+                sidebarDragStartWidth = nil
+            }
+    }
+
+    // MARK: - Content Panel
+
+    private var contentPanel: some View {
+        VStack(spacing: 12) {
+            switch viewModel.selectedItem {
+            case .meeting:
+                meetingContent
+            default:
+                queueContent
+            }
+        }
+        .padding(16)
+        .animation(.spring(response: 0.35, dampingFraction: 0.75), value: singleSelectedTask?.id)
+    }
+
+    // MARK: - Queue Content
+
+    private var queueContent: some View {
+        Group {
+            if viewModel.selectedItem == .inbox {
+                inboxPanel
+            } else {
+                if viewModel.visibleTasks.isEmpty {
+                    emptyStatePanel
+                } else {
+                    if viewModel.isMultiSelect {
+                        bulkActionsBar
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                    taskListPanel
+                }
+            }
+
+            if viewModel.selectedItem == .inbox, let thought = selectedInboxThought {
+                thoughtEditorPanel(thought)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else if let task = singleSelectedTask {
+                taskDetailsPanel(task: task)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else {
+                composerPanel
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+    }
+
+    // MARK: - Meeting Content
+
+    @ViewBuilder
+    private var meetingContent: some View {
+        if let meeting = viewModel.selectedMeeting {
+            if meeting.isActive {
+                HStack {
+                    Label("In Progress", systemImage: "record.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.red)
+                    Spacer()
+                    Button("End Meeting") {
+                        openEndMeetingSheet()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color.red.opacity(0.12)))
+                    .overlay(Capsule().stroke(Color.red.opacity(0.25), lineWidth: 1))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(glassPanel(cornerRadius: 10))
+            }
+
+            MeetingDetailView(
+                meeting: meeting,
+                items: viewModel.tasksForMeeting(meeting),
+                onUpdateSummary: { summary in viewModel.updateMeetingSummary(meeting, summary: summary) },
+                onToggleDone: { viewModel.toggleDone($0) },
+                onDelete: { viewModel.delete($0) }
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(glassPanel(cornerRadius: 16))
+
+            composerPanel
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+        } else {
+            VStack(spacing: 12) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 34))
+                    .foregroundStyle(.secondary)
+                Text("Meeting not found")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    // MARK: - Start Meeting Sheet
+
+    private var startMeetingSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Start Meeting")
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                    Text("Use the same format as quick capture: a title and who it's with.")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Cancel") {
+                    showStartMeetingSheet = false
+                }
+                .keyboardShortcut(.cancelAction)
+                .buttonStyle(.plain)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Meeting title")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                meetingInputField("Planning", text: $meetingTitleInput)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("With")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                meetingInputField("Sarah", text: $meetingPersonInput)
+            }
+
+            Text("Quick capture equivalent: `/m Planning with Sarah`")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.tertiary)
+
+            HStack {
+                Spacer()
+                Button("Start") {
+                    startMeeting()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 13, weight: .bold))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Capsule().fill(Color.accentColor))
+                .foregroundStyle(.white)
+                .keyboardShortcut(.defaultAction)
+                .disabled(meetingTitleInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 460)
+        .background(backgroundLayer)
+    }
+
+    private var endMeetingSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("End Meeting")
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                    Text("Add a short summary before ending the meeting.")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Cancel") {
+                    showEndMeetingSheet = false
+                }
+                .keyboardShortcut(.cancelAction)
+                .buttonStyle(.plain)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Summary")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+
+                TextEditor(text: $meetingSummaryInput)
+                    .font(.system(size: 15, weight: .regular))
+                    .scrollContentBackground(.hidden)
+                    .background(Color.clear)
+                    .frame(minHeight: 120)
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(.thinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(panelStrokeColor, lineWidth: 1)
+                            )
+                    )
+            }
+
+            HStack {
+                Spacer()
+                Button("End Meeting") {
+                    endMeeting()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 13, weight: .bold))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Capsule().fill(Color.red))
+                .foregroundStyle(.white)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 460)
+        .background(backgroundLayer)
+    }
+
+    private func openStartMeetingSheet() {
+        meetingTitleInput = ""
+        meetingPersonInput = ""
+        showStartMeetingSheet = true
+    }
+
+    private func openEndMeetingSheet() {
+        meetingSummaryInput = meetingSession.meetingSummary ?? ""
+        showEndMeetingSheet = true
+    }
+
+    private func startMeeting() {
+        let title = TaskTextFormatter.formattedTitle(meetingTitleInput)
+        guard !title.isEmpty else { return }
+        let person = TaskTextFormatter.formattedPerson(meetingPersonInput)
+
+        try? meetingSession.startMeeting(title: title, attendees: person)
+        if let active = meetingSession.activeMeeting {
+            viewModel.selectedItem = .meeting(active.id)
+        }
+        showStartMeetingSheet = false
+    }
+
+    private func endMeeting() {
+        let summary = TaskTextFormatter.formattedNote(meetingSummaryInput) ?? meetingSession.meetingSummary
+        try? meetingSession.endCurrentMeeting(summary: summary)
+        showEndMeetingSheet = false
+    }
+
+    private func meetingInputField(_ placeholder: String, text: Binding<String>) -> some View {
+        TextField(placeholder, text: text)
+            .textFieldStyle(.plain)
+            .font(.system(size: 16, weight: .medium, design: .rounded))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(.thinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(panelStrokeColor, lineWidth: 1)
+                    )
+            )
+    }
+
+    // MARK: - Inbox Panel
 
     private var inboxPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Inbox")
-                    .font(.system(size: 13, weight: .bold))
+                Text("\(viewModel.thoughts.count) notes")
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
-                Text("—")
-                    .foregroundStyle(.tertiary)
-                Text("Brain dumps and random thoughts")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.tertiary)
                 Spacer()
-                Text("Type // or /t to capture a thought")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 10)
+            .padding(.top, 12)
+            .padding(.bottom, 6)
 
             if viewModel.thoughts.isEmpty {
                 VStack(spacing: 12) {
-                    Image(systemName: "brain")
+                    Image(systemName: "note.text")
                         .font(.system(size: 36))
                         .foregroundStyle(.secondary)
                     Text("Nothing in your inbox")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(.secondary)
-                    Text("Use // or /t in quick capture to dump a thought.\nNo structure needed.")
+                    Text("Use the composer below or /n in quick capture.")
                         .font(.system(size: 13))
                         .foregroundStyle(.tertiary)
                         .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 6) {
-                        ForEach(viewModel.thoughts) { thought in
-                            thoughtRow(thought)
-                        }
+                List {
+                    ForEach(viewModel.thoughts) { thought in
+                        thoughtRow(thought)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
+                    .onMove(perform: viewModel.moveThought)
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(glassPanel(cornerRadius: 18))
-        .shadow(color: Color.black.opacity(0.05), radius: 14, y: 5)
+        .background(glassPanel(cornerRadius: 16))
+        .onTapGesture {
+            guard selectedInboxThoughtID != nil else { return }
+            closeThoughtEditor()
+        }
     }
 
     private func thoughtRow(_ thought: Task) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "bubble.left")
-                .font(.system(size: 14))
-                .foregroundStyle(Color.indigo.opacity(0.6))
-                .frame(width: 18)
-                .padding(.top, 2)
+        let isSelected = selectedInboxThoughtID == thought.id
+        return ThoughtRowView(
+            thought: thought,
+            isSelected: isSelected,
+            onSelect: { openThoughtEditor(thought) },
+            onDelete: { viewModel.delete(thought) }
+        )
+    }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(thought.title)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
+    private var selectedInboxThought: Task? {
+        guard let selectedInboxThoughtID else { return nil }
+        return viewModel.thoughts.first(where: { $0.id == selectedInboxThoughtID })
+    }
+
+    private func thoughtEditorPanel(_ thought: Task) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                Text("Editing Note")
+                    .font(.system(size: 14, weight: .bold))
+
+                Spacer()
 
                 if let created = thought.createdAtValue {
                     Text(RelativeDateTimeFormatter().localizedString(for: created, relativeTo: .now))
-                        .font(.system(size: 11))
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.tertiary)
                 }
             }
+            .padding(.bottom, 16)
 
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(.thinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(panelStrokeColor, lineWidth: 1)
-                )
-        )
-        .contextMenu {
-            Button(role: .destructive) { viewModel.delete(thought) } label: {
-                Label("Delete", systemImage: "trash")
+            TextEditor(text: $thoughtEditorText)
+                .font(.system(size: 16, weight: .regular))
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
+                .frame(minHeight: 200)
+                .padding(.bottom, 16)
+                .onExitCommand {
+                    closeThoughtEditor()
+                }
+
+            HStack {
+                Button("Delete", role: .destructive) {
+                    viewModel.delete(thought)
+                    closeThoughtEditor()
+                    thoughtEditorText = ""
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.red.opacity(0.8))
+
+                Spacer()
+
+                Button("Close") {
+                    closeThoughtEditor()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .keyboardShortcut(.cancelAction)
+
+                Button("Save") {
+                    saveThoughtEditor(thought)
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 13, weight: .bold))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.accentColor))
+                .foregroundStyle(.white)
+                .keyboardShortcut(.defaultAction)
+                .disabled(thoughtEditorText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .background(glassPanel(cornerRadius: 16))
+        .onTapGesture { }
     }
+
+    private func openThoughtEditor(_ thought: Task) {
+        if selectedInboxThoughtID == thought.id {
+            selectedInboxThoughtID = nil
+            return
+        }
+        thoughtEditorText = thought.title
+        selectedInboxThoughtID = thought.id
+    }
+
+    private func saveThoughtEditor(_ thought: Task) {
+        let trimmed = thoughtEditorText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        viewModel.updateTask(
+            id: thought.id,
+            rawInput: trimmed,
+            title: trimmed,
+            queue: .thought,
+            status: thought.status,
+            person: nil,
+            dueDate: nil,
+            note: nil
+        )
+        closeThoughtEditor()
+    }
+
+    private func closeThoughtEditor() {
+        selectedInboxThoughtID = nil
+    }
+
+    // MARK: - Task List
 
     private var taskListPanel: some View {
         VStack(spacing: 0) {
@@ -418,18 +971,19 @@ struct MainTaskListView: View {
                         TaskRowView(
                             task: task,
                             isSelected: viewModel.selectedTaskIDs.contains(task.id),
-                            showQueueBadge: viewModel.selectedTab == .all,
+                            showQueueBadge: viewModel.selectedItem == .all,
                             onToggle: { viewModel.toggleDone(task) }
                         )
                         .tag(task.id)
                         .contextMenu {
                             Button("Edit") { beginEditing(task) }
+                            Button("Add to Today List") { viewModel.addTaskToDailyFocus(task) }
                             Button("Snooze") { viewModel.snooze(task) }
                             Button("Delete", role: .destructive) { viewModel.delete(task) }
                         }
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 4, trailing: 8))
+                        .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
                     }
                     .onMove(perform: viewModel.moveActive)
                 } header: {
@@ -442,18 +996,19 @@ struct MainTaskListView: View {
                             TaskRowView(
                                 task: task,
                                 isSelected: viewModel.selectedTaskIDs.contains(task.id),
-                                showQueueBadge: viewModel.selectedTab == .all,
+                                showQueueBadge: viewModel.selectedItem == .all,
                                 onToggle: { viewModel.toggleDone(task) }
                             )
                             .tag(task.id)
                             .contextMenu {
                                 Button("Edit") { beginEditing(task) }
+                                Button("Add to Today List") { viewModel.addTaskToDailyFocus(task) }
                                 Button("Delete", role: .destructive) { viewModel.delete(task) }
                             }
                             .opacity(0.72)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 4, trailing: 8))
+                            .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
                         }
                     } header: {
                         sectionHeader("Completed")
@@ -467,18 +1022,19 @@ struct MainTaskListView: View {
                                 TaskRowView(
                                     task: task,
                                     isSelected: viewModel.selectedTaskIDs.contains(task.id),
-                                    showQueueBadge: viewModel.selectedTab == .all,
+                                    showQueueBadge: viewModel.selectedItem == .all,
                                     onToggle: {}
                                 )
                                 .tag(task.id)
                                 .contextMenu {
                                     Button("Edit") { beginEditing(task) }
+                                    Button("Add to Today List") { viewModel.addTaskToDailyFocus(task) }
                                     Button("Delete", role: .destructive) { viewModel.delete(task) }
                                 }
                                 .opacity(0.56)
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 4, trailing: 8))
+                                .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
                             }
                         }
                     } header: {
@@ -486,7 +1042,7 @@ struct MainTaskListView: View {
                             sectionHeader("Archive")
                             Spacer()
                             Button(archiveExpanded ? "Hide" : "Show") {
-                                withAnimation(.easeInOut(duration: 0.18)) {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                     archiveExpanded.toggle()
                                 }
                             }
@@ -503,8 +1059,7 @@ struct MainTaskListView: View {
             .environment(\.defaultMinListRowHeight, 52)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(glassPanel(cornerRadius: 18))
-        .shadow(color: Color.black.opacity(0.05), radius: 14, y: 5)
+        .background(glassPanel(cornerRadius: 16))
     }
 
     private var emptyStatePanel: some View {
@@ -516,39 +1071,18 @@ struct MainTaskListView: View {
             Text("No tasks yet")
                 .font(.system(size: 24, weight: .bold, design: .rounded))
 
-            Text("Use the input bar at the bottom to add your first task. Type what you need to do, then press Enter.")
+            Text("Use the composer below to add your first task.")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 430)
-
-            Button {
-                focusPrompt()
-            } label: {
-                Label("Focus Input", systemImage: "keyboard")
-                    .font(.system(size: 13, weight: .semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        Capsule()
-                            .fill(.thinMaterial)
-                            .overlay(
-                                Capsule()
-                                    .stroke(panelStrokeColor, lineWidth: 1)
-                            )
-                    )
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut("l", modifiers: [.command])
-            .help("Focus the in-app input")
-            .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
-        .background(glassPanel(cornerRadius: 18))
-        .shadow(color: Color.black.opacity(0.05), radius: 14, y: 5)
+        .background(glassPanel(cornerRadius: 16))
     }
+
+    // MARK: - Composer
 
     private var composerPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -564,106 +1098,202 @@ struct MainTaskListView: View {
 
                 Spacer()
 
-                Button(composer.isEditing ? "Cancel Edit" : "New") {
-                    startNewComposer()
+                if composer.isEditing {
+                    Button("Cancel Edit") {
+                        startNewComposer()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
             }
 
-            TextField(composer.isEditing ? "Update this task..." : "Capture a new task...", text: $composer.rawInput)
-                .textFieldStyle(.plain)
-                .font(.system(size: 18, weight: .medium, design: .rounded))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(.thinMaterial)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(panelStrokeColor, lineWidth: 1)
-                        )
-                )
-                .focused($focusedComposerField, equals: .main)
-                .onSubmit(submitComposer)
+            HStack(spacing: 6) {
+                Text("Editing \(selectedMetadataField.title)")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                if composer.command?.kind == .meetingStart {
+                    Text("meeting command active")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.purple.opacity(0.85))
+                } else if composer.command?.kind == .meetingEnd {
+                    Text("end meeting with summary")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.purple.opacity(0.85))
+                } else if composer.command?.kind == .meetingSummary {
+                    Text("set meeting summary")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.purple.opacity(0.85))
+                } else if selectedMetadataField == .due {
+                    Text("type naturally or use picker below")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(spacing: 10) {
+                if selectedMetadataField == .main, let command = composer.command {
+                    composerCommandPill(command)
+                }
+
+                TextField(composerInputPlaceholder, text: $metadataEditorInput)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                    .focused($focusedComposerField, equals: .main)
+                    .onChange(of: metadataEditorInput) { _, _ in
+                        applyMetadataEditorInput()
+                    }
+                    .onSubmit(submitComposer)
+                    .onHover { hovering in
+                        isComposerInputHovering = hovering
+                    }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(.thinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(composerInputStrokeColor, lineWidth: composerInputStrokeWidth)
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        focusedComposerField = .main
+                    }
+                    .animation(.easeOut(duration: 0.15), value: isComposerInputHovering)
+                    .animation(.easeOut(duration: 0.15), value: composerInputIsFocused)
+            )
+            .shadow(
+                color: Color.accentColor.opacity(composerInputIsFocused ? 0.18 : (isComposerInputHovering ? 0.08 : 0)),
+                radius: composerInputIsFocused ? 10 : 6,
+                y: composerInputIsFocused ? 2 : 1
+            )
+
+            if selectedMetadataField == .main, composer.command == nil, !composerCommandSuggestions.isEmpty {
+                composerCommandSuggestionsPanel
+            }
 
             HStack(spacing: 8) {
-                metadataCard(
-                    text: "Queue: \(resolvedQueue.displayName)",
-                    field: .queue,
-                    color: resolvedQueue == .work ? .orange : .blue
-                )
-
-                metadataCard(
-                    text: resolvedDueDate.map(relativeDate) ?? "Due Date",
-                    field: .due,
-                    color: .pink
-                )
-
-                metadataCard(
-                    text: resolvedNote.map { "Note: \($0)" } ?? "Note",
-                    field: .note,
-                    color: .teal
-                )
-
-                if composer.isEditing {
+                if composer.command?.kind == .meetingStart {
+                    Text("Enter the meeting title, optionally with 'with Name'")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.purple.opacity(0.88))
+                } else if composer.command?.kind == .meetingEnd {
+                    Text("Add a summary, then press Return to end the meeting")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.purple.opacity(0.88))
+                } else if composer.command?.kind == .meetingSummary {
+                    Text("Update the meeting summary without ending it")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.purple.opacity(0.88))
+                } else {
                     metadataCard(
-                        text: "Status: \(composer.status.rawValue.capitalized)",
-                        field: .status,
-                        color: composer.status == .done ? .green : (composer.status == .archived ? .gray : .indigo)
+                        text: "Queue: \(resolvedQueue.displayName)",
+                        field: .queue,
+                        color: queueColor(resolvedQueue)
                     )
+
+                    metadataCard(
+                        text: resolvedDueDate.map(relativeDate) ?? "Due Date",
+                        field: .due,
+                        color: .pink
+                    )
+
+                    metadataCard(
+                        text: resolvedNote.map { "Note: \($0)" } ?? "Note",
+                        field: .note,
+                        color: .teal
+                    )
+
+                    if composer.isEditing {
+                        metadataCard(
+                            text: "Status: \(composer.status.rawValue.capitalized)",
+                            field: .status,
+                            color: composer.status == .done ? .green : (composer.status == .archived ? .gray : .indigo)
+                        )
+                    }
                 }
 
                 Spacer()
-                Text("Tab: Next Field • Shift+Tab: Previous • Enter: Save • Esc: Focus/Unfocus")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                Text("Tab: Next  Shift+Tab: Prev  Enter: Save  Esc: Focus")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
             }
 
-            if selectedMetadataField != .main {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Editing \(selectedMetadataField.title)")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.secondary)
-
-                    HStack(spacing: 8) {
-                        TextField(selectedMetadataField.placeholder, text: $metadataEditorInput)
-                            .textFieldStyle(.roundedBorder)
-                            .focused($focusedComposerField, equals: .auxiliary)
-                            .onChange(of: metadataEditorInput) { _, _ in
-                                applyMetadataEditorInput()
-                            }
-                            .onSubmit(submitComposer)
-
-                        if selectedMetadataField == .due {
-                            DatePicker(
-                                "",
-                                selection: Binding(
-                                    get: { composer.dueDate ?? Date() },
-                                    set: { newValue in
-                                        composer.dueDate = newValue
-                                        composer.dueText = dueFieldFormatter.string(from: newValue)
-                                        metadataEditorInput = composer.dueText
-                                    }
-                                ),
-                                displayedComponents: .date
-                            )
-                            .labelsHidden()
-                            .datePickerStyle(.compact)
-                        }
-                    }
-                }
+            if selectedMetadataField == .due,
+               composer.command?.kind != .meetingStart,
+               composer.command?.kind != .meetingEnd,
+               composer.command?.kind != .meetingSummary {
+                dueDateEditorPanel
             }
         }
-        .onChange(of: composer.rawInput) { _, _ in
-            if selectedMetadataField == .main {
-                metadataEditorInput = composer.rawInput
-            }
+        .onAppear {
+            syncMetadataEditorInputFromSelection()
         }
         .padding(14)
         .background(glassPanel(cornerRadius: 16))
-        .shadow(color: Color.black.opacity(0.05), radius: 10, y: 4)
+    }
+
+    private var dueDateEditorPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Label("Quick Suggestions", systemImage: "bolt.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Clear Date") {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        composer.dueDate = nil
+                        composer.dueText = ""
+                        metadataEditorInput = ""
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.red)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    quickDateButton("Today", icon: "sun.max.fill")
+                    quickDateButton("Tomorrow", icon: "moon.stars.fill")
+                    quickDateButton("This Weekend", icon: "cup.and.saucer.fill")
+                    quickDateButton("Next Week", icon: "calendar.badge.clock")
+                    quickDateButton("In 2 weeks", icon: "clock.fill")
+                }
+            }
+
+            Text("Tip: you can also type values like `3pm`, `tomorrow at 12`, or `in 12 hours`.")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.thinMaterial)
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(panelStrokeColor, lineWidth: 1))
+        )
+    }
+
+    private func quickDateButton(_ title: String, icon: String) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                metadataEditorInput = title.lowercased()
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 11))
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.secondary.opacity(0.1)))
+            .overlay(Capsule().stroke(Color.secondary.opacity(0.2), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 
     private var singleSelectedTask: Task? {
@@ -671,66 +1301,229 @@ struct MainTaskListView: View {
         return viewModel.visibleTasks.first(where: { $0.id == id })
     }
 
+    // MARK: - Task Details Panel
+
     private func taskDetailsPanel(task: Task) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Text("Task Details")
-                    .font(.system(size: 13, weight: .bold))
-                Spacer()
-                Button("Edit") {
-                    beginEditing(task)
+        let naturalBinding = taskDetailBinding(\.naturalInput, default: task.rawInput.isEmpty ? task.title : task.rawInput)
+        let titleBinding = taskDetailBinding(\.title, default: task.title)
+        let queueBinding = taskDetailBinding(\.queue, default: task.queue)
+        let statusBinding = taskDetailBinding(\.status, default: task.status)
+        let personBinding = taskDetailBinding(\.person, default: task.person ?? "")
+        let noteBinding = taskDetailBinding(\.note, default: task.note ?? "")
+        let dueTextBinding = taskDetailBinding(\.dueText, default: task.dueDateValue.map(dueFieldFormatter.string(from:)) ?? "")
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        viewModel.clearSelection()
+                    }
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-                Button("Close") {
-                    withAnimation(.easeOut(duration: 0.16)) {
-                        viewModel.clearSelection()
+
+                Text("Edit Task")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button("Revert") {
+                    withAnimation {
+                        resetTaskDetailDraft(from: task)
                     }
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
-            }
 
-            Text(task.title)
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let note = task.note, !note.isEmpty {
-                detailLine(label: "Note", value: note)
-            }
-
-            HStack(spacing: 8) {
-                keyChip("Queue: \(task.queue.displayName)")
-                keyChip("Status: \(task.status.rawValue.capitalized)")
-                if let dueDate = task.dueDateValue {
-                    keyChip("Due: \(longDate(dueDate))")
+                Button("Save") {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        saveTaskDetailEdits()
+                    }
                 }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .bold))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.accentColor))
+                .foregroundStyle(.white)
+                .disabled(taskDetailDraft?.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
             }
 
-            if !task.rawInput.isEmpty {
-                detailLine(label: "Captured", value: task.rawInput)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Natural Language")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .kerning(0.5)
+
+                TextField("follow up with Chris tomorrow at 3 about pricing", text: naturalBinding)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 16, weight: .medium, design: .rounded))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(.thinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(panelStrokeColor, lineWidth: 1)
+                            )
+                    )
+                    .onChange(of: naturalBinding.wrappedValue) { _, _ in
+                        applyNaturalTaskDetailInput()
+                    }
+
+                Text("Type naturally and queue/person/due/note fields update live.")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            TextField("Task title", text: titleBinding)
+                .textFieldStyle(.plain)
+                .font(.system(size: 26, weight: .semibold, design: .rounded))
+                .padding(.horizontal, 4)
+
+            HStack(spacing: 12) {
+                Picker("Queue", selection: queueBinding) {
+                    ForEach(TaskQueue.allCases, id: \.self) { queue in
+                        Text(queue.displayName).tag(queue)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Picker("Status", selection: statusBinding) {
+                    ForEach(TaskStatus.allCases, id: \.self) { status in
+                        Text(status.rawValue.capitalized).tag(status)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Spacer()
+            }
+
+            HStack(spacing: 10) {
+                TextField("Person (optional)", text: personBinding)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 13, weight: .medium))
+
+                TextField("Due date/time (optional)", text: dueTextBinding)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 13, weight: .medium))
+                    .onChange(of: dueTextBinding.wrappedValue) { _, newValue in
+                        if let parsed = parseDatePhrase(newValue, baseDate: taskDetailDraft?.dueDate ?? task.dueDateValue) {
+                            taskDetailDraft?.dueDate = parsed
+                        } else if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            taskDetailDraft?.dueDate = nil
+                        }
+                    }
+
+                DatePicker(
+                    "",
+                    selection: Binding(
+                        get: { taskDetailDraft?.dueDate ?? task.dueDateValue ?? Date() },
+                        set: { newValue in
+                            taskDetailDraft?.dueDate = newValue
+                            taskDetailDraft?.dueText = dueFieldFormatter.string(from: newValue)
+                        }
+                    ),
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+                .labelsHidden()
+                .datePickerStyle(.compact)
+
+                Button("Clear") {
+                    taskDetailDraft?.dueDate = nil
+                    taskDetailDraft?.dueText = ""
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Notes", systemImage: "note.text")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+
+                TextEditor(text: noteBinding)
+                    .font(.system(size: 15, weight: .regular))
+                    .scrollContentBackground(.hidden)
+                    .background(Color.clear)
+                    .frame(minHeight: 120)
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(.thinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(panelStrokeColor, lineWidth: 1)
+                            )
+                    )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
+        .padding(20)
         .background(glassPanel(cornerRadius: 16))
-        .shadow(color: Color.black.opacity(0.04), radius: 8, y: 4)
-    }
-
-    private func detailLine(label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label.uppercased())
-                .font(.system(size: 10, weight: .bold))
-                .kerning(0.5)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.primary.opacity(0.92))
-                .fixedSize(horizontal: false, vertical: true)
+        .onAppear {
+            if taskDetailDraft?.id != task.id {
+                resetTaskDetailDraft(from: task)
+            }
         }
     }
+
+    // MARK: - Bulk Actions
+
+    private var bulkActionsBar: some View {
+        HStack(spacing: 12) {
+            Text("\(viewModel.selectedTaskIDs.count) selected")
+                .font(.system(size: 13, weight: .bold))
+
+            Spacer()
+
+            Button("Mark Done") { viewModel.bulkMarkDone() }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.green.opacity(0.15)))
+                .overlay(Capsule().stroke(Color.green.opacity(0.3), lineWidth: 1))
+
+            Button("Snooze") { viewModel.bulkSnooze() }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.orange.opacity(0.15)))
+                .overlay(Capsule().stroke(Color.orange.opacity(0.3), lineWidth: 1))
+
+            Button("Delete") { showDeleteConfirmation = true }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.red)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.red.opacity(0.15)))
+                .overlay(Capsule().stroke(Color.red.opacity(0.3), lineWidth: 1))
+
+            Button("Deselect") { withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { viewModel.clearSelection() } }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.gray.opacity(0.12)))
+                .overlay(Capsule().stroke(Color.gray.opacity(0.25), lineWidth: 1))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(glassPanel(cornerRadius: 12))
+    }
+
+    // MARK: - Style Helpers
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
@@ -739,75 +1532,34 @@ struct MainTaskListView: View {
             .foregroundStyle(.secondary)
     }
 
-    private func keyChip(_ label: String) -> some View {
-        Text(label)
-            .font(.system(size: 12, weight: .bold))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(.thinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(LinearGradient(colors: chipGradientColors, startPoint: .topLeading, endPoint: .bottomTrailing))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(panelStrokeColor, lineWidth: 1)
-                    )
-            )
-    }
-
-    private func tabButton(_ tab: TaskListViewModel.Tab, shortcut: Character) -> some View {
-        let isSelected = viewModel.selectedTab == tab
-        let strokeColor = isSelected ? Color.blue.opacity(0.32) : panelStrokeColor
-        let textColor = isSelected ? Color.blue.opacity(0.95) : Color.primary.opacity(0.8)
-        let backgroundColors = isSelected
-            ? [Color.blue.opacity(0.30), Color.blue.opacity(0.18)]
-            : chipGradientColors
-
-        return Button {
-            withAnimation(.easeOut(duration: 0.15)) {
-                viewModel.selectedTab = tab
-            }
-        } label: {
-            Text(tab.title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(textColor)
-                .frame(minWidth: 68)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    Capsule()
-                        .fill(.thinMaterial)
-                        .overlay(
-                            Capsule()
-                                .fill(LinearGradient(colors: backgroundColors, startPoint: .topLeading, endPoint: .bottomTrailing))
-                        )
-                        .overlay(
-                            Capsule().stroke(strokeColor, lineWidth: 1)
-                        )
-                )
-                .contentShape(Capsule())
-        }
-        .keyboardShortcut(KeyEquivalent(shortcut), modifiers: [.command])
-        .buttonStyle(.plain)
-    }
-
     private var panelStrokeColor: Color {
         colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.08)
+    }
+
+    private var composerInputIsFocused: Bool {
+        focusedComposerField == .main
+    }
+
+    private var composerInputStrokeColor: Color {
+        if composerInputIsFocused {
+            return Color.accentColor.opacity(0.58)
+        }
+        if isComposerInputHovering {
+            return Color.accentColor.opacity(0.34)
+        }
+        return panelStrokeColor
+    }
+
+    private var composerInputStrokeWidth: CGFloat {
+        if composerInputIsFocused { return 1.6 }
+        if isComposerInputHovering { return 1.2 }
+        return 1
     }
 
     private var panelGradientColors: [Color] {
         colorScheme == .dark
             ? [Color.white.opacity(0.08), Color.white.opacity(0.03)]
             : [Color.white.opacity(0.72), Color.white.opacity(0.52)]
-    }
-
-    private var chipGradientColors: [Color] {
-        colorScheme == .dark
-            ? [Color.white.opacity(0.10), Color.white.opacity(0.04)]
-            : [Color.white.opacity(0.70), Color.white.opacity(0.52)]
     }
 
     private func glassPanel(cornerRadius: CGFloat) -> some View {
@@ -850,18 +1602,116 @@ struct MainTaskListView: View {
         .buttonStyle(.plain)
     }
 
-    private func relativeDate(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        return formatter.localizedString(for: date, relativeTo: .now)
+    private var composerInputPlaceholder: String {
+        if selectedMetadataField == .main, let command = composer.command {
+            return command.prompt
+        }
+        if selectedMetadataField == .main {
+            switch viewModel.selectedItem {
+            case .meeting: return "Add to this meeting..."
+            default: return "What do you need to do?"
+            }
+        }
+        return selectedMetadataField.placeholder
     }
 
-    private func longDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .long
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
+    private var composerCommandSuggestions: [InputCommand] {
+        guard selectedMetadataField == .main else { return [] }
+        return InputCommandParser.suggestedCommands(for: metadataEditorInput)
     }
+
+    private func composerCommandPill(_ command: InputCommand) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: commandIcon(for: command))
+                .font(.system(size: 11, weight: .bold))
+            Text(command.label)
+                .font(.system(size: 14, weight: .bold))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Capsule().fill(commandColor(for: command).opacity(0.24)))
+        .overlay(Capsule().stroke(commandColor(for: command).opacity(0.58), lineWidth: 1.5))
+        .foregroundStyle(commandColor(for: command).opacity(0.95))
+    }
+
+    private var composerCommandSuggestionsPanel: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(composerCommandSuggestions, id: \.id) { command in
+                HStack(spacing: 8) {
+                    Text(command.trigger)
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 84, alignment: .leading)
+                    Text(command.label)
+                        .font(.system(size: 12, weight: .semibold))
+                    Spacer()
+                    Text(command.prompt)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(.thinMaterial)
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(panelStrokeColor, lineWidth: 1))
+        )
+    }
+
+    // MARK: - Date Formatting
+
+    private func relativeDate(_ date: Date) -> String {
+        let calendar = Calendar.current
+        let startOfToday = calendar.startOfDay(for: .now)
+        let startOfDueDay = calendar.startOfDay(for: date)
+        let dayDelta = calendar.dateComponents([.day], from: startOfToday, to: startOfDueDay).day ?? 0
+
+        let dayText: String
+        switch dayDelta {
+        case 0: dayText = "today"
+        case 1: dayText = "tomorrow"
+        case -1: dayText = "yesterday"
+        case 2...6: dayText = shortWeekdayFormatter.string(from: date)
+        default: dayText = shortDateFormatter.string(from: date)
+        }
+
+        if hasExplicitDueTime(date) {
+            return "\(dayText) \(shortTimeFormatter.string(from: date))"
+        }
+        return dayText
+    }
+
+    private func hasExplicitDueTime(_ date: Date) -> Bool {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        let hour = components.hour ?? 0
+        let minute = components.minute ?? 0
+        if hour == 0 && minute == 0 { return false }
+        return !(hour == TaskParser.defaultDueHour && minute == TaskParser.defaultDueMinute)
+    }
+
+    private var shortDateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }
+
+    private var shortWeekdayFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("EEE")
+        return formatter
+    }
+
+    private var shortTimeFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter
+    }
+
+    // MARK: - Resolver Logic
 
     private static let queueSignalPhrases = [
         "follow up", "follow-up", "check in", "check-in", "reach out", "email", "call", "text", "ping", "contact", "message"
@@ -872,6 +1722,9 @@ struct MainTaskListView: View {
     }
 
     private var resolvedQueue: TaskQueue {
+        if let command = composer.command, case let .queue(queue) = command.kind {
+            return queue
+        }
         if hasQueueSignal(composer.rawInput) {
             return parsedMain.queue
         }
@@ -886,13 +1739,16 @@ struct MainTaskListView: View {
     }
 
     private var resolvedDueDate: Date? {
+        if let fromDueField = parseDatePhrase(composer.dueText, baseDate: composer.dueDate) {
+            return fromDueField
+        }
+        if let dueDate = composer.dueDate {
+            return dueDate
+        }
         if let parsedDue = parsedMain.dueDate {
             return parsedDue
         }
-        if let fromDueField = parseDatePhrase(composer.dueText) {
-            return fromDueField
-        }
-        return composer.dueDate
+        return nil
     }
 
     private var resolvedNote: String? {
@@ -915,17 +1771,127 @@ struct MainTaskListView: View {
     }
 
     private func hasQueueSignal(_ input: String) -> Bool {
+        if let command = composer.command, case .queue = command.kind {
+            return true
+        }
         let lower = input.lowercased()
-        if lower.range(of: #"(?:^|\s)/(?:w|r)(?=\s|$)"#, options: .regularExpression) != nil {
+        if lower.range(of: #"(?:^|\s)/(?:w|r|t)(?=\s|$)"#, options: .regularExpression) != nil {
+            return true
+        }
+        if lower.hasPrefix("//") {
             return true
         }
         return Self.queueSignalPhrases.contains { lower.contains($0) }
     }
 
-    private func parseDatePhrase(_ phrase: String) -> Date? {
+    // MARK: - Date Parsing
+
+    private func parseDatePhrase(_ phrase: String, baseDate: Date? = nil) -> Date? {
         let trimmed = phrase.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        return TaskParser.parse(trimmed, fallbackToRawTitle: false).dueDate
+
+        if let exact = parseExplicitDateValue(trimmed) {
+            return exact
+        }
+
+        let parsedDate = TaskParser.parse(trimmed, fallbackToRawTitle: false).dueDate
+        let parsedTime = parseTimeComponents(from: trimmed)
+
+        if let parsedDate {
+            return applyingTime(parsedTime, to: parsedDate)
+        }
+
+        guard let parsedTime else { return nil }
+        let anchor = baseDate ?? Date()
+        return applyingTime(parsedTime, to: anchor)
+    }
+
+    private func parseExplicitDateValue(_ input: String) -> Date? {
+        if let date = dueFieldFormatter.date(from: input) {
+            return date
+        }
+
+        let formatterStyles: [(DateFormatter.Style, DateFormatter.Style)] = [
+            (.short, .short), (.medium, .short), (.long, .short),
+            (.short, .none), (.medium, .none), (.long, .none)
+        ]
+
+        for style in formatterStyles {
+            let formatter = DateFormatter()
+            formatter.locale = .current
+            formatter.dateStyle = style.0
+            formatter.timeStyle = style.1
+            if let date = formatter.date(from: input) {
+                return date
+            }
+        }
+
+        return ISO8601DateFormatter().date(from: input)
+    }
+
+    private func parseTimeComponents(from input: String) -> DateComponents? {
+        let normalized = input.lowercased().replacingOccurrences(of: ".", with: "")
+
+        let twelveHourPattern = #"\b(\d{1,2})(?::([0-5]\d))?\s*([ap]m)\b"#
+        if let match = firstRegexMatch(twelveHourPattern, in: normalized) {
+            let hourToken = match.captures[0] ?? ""
+            let minuteToken = match.captures[1]
+            let meridiem = match.captures[2] ?? "am"
+            guard let hourValue = Int(hourToken), (1...12).contains(hourValue) else { return nil }
+            let minuteValue = Int(minuteToken ?? "") ?? 0
+            let baseHour = hourValue % 12
+            let hour = meridiem == "pm" ? baseHour + 12 : baseHour
+            return DateComponents(hour: hour, minute: minuteValue, second: 0)
+        }
+
+        let twentyFourHourPattern = #"\b([01]?\d|2[0-3]):([0-5]\d)\b"#
+        if let match = firstRegexMatch(twentyFourHourPattern, in: normalized),
+           let hour = Int(match.captures[0] ?? ""),
+           let minute = Int(match.captures[1] ?? "") {
+            return DateComponents(hour: hour, minute: minute, second: 0)
+        }
+
+        return nil
+    }
+
+    private func firstRegexMatch(_ pattern: String, in input: String) -> RegexCaptureMatch? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let ns = input as NSString
+        guard let match = regex.firstMatch(in: input, range: NSRange(location: 0, length: ns.length)) else {
+            return nil
+        }
+
+        var captures: [String?] = []
+        if match.numberOfRanges > 1 {
+            for index in 1..<match.numberOfRanges {
+                let range = match.range(at: index)
+                if range.location == NSNotFound {
+                    captures.append(nil)
+                } else {
+                    captures.append(ns.substring(with: range))
+                }
+            }
+        }
+
+        return RegexCaptureMatch(captures: captures)
+    }
+
+    private func applyingTime(_ time: DateComponents?, to date: Date) -> Date {
+        guard let time else { return date }
+        var components = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        components.hour = time.hour
+        components.minute = time.minute
+        components.second = 0
+        return Calendar.current.date(from: components) ?? date
+    }
+
+    // MARK: - Submit / Editing
+
+    private var composerMeetingId: String? {
+        if case .meeting(let id) = viewModel.selectedItem { return id }
+        return nil
     }
 
     private var editingBaseTask: Task? {
@@ -934,6 +1900,30 @@ struct MainTaskListView: View {
     }
 
     private func submitComposer() {
+        switch composer.command?.kind {
+        case .meetingStart:
+            let draft = MeetingDraftParser.parse(composer.rawInput)
+            guard !draft.title.isEmpty else { return }
+            try? meetingSession.startMeeting(title: draft.title, attendees: draft.person)
+            if let active = meetingSession.activeMeeting {
+                viewModel.selectedItem = .meeting(active.id)
+            }
+            startNewComposer()
+            return
+        case .meetingEnd:
+            let summary = TaskTextFormatter.formattedNote(composer.rawInput) ?? meetingSession.meetingSummary
+            try? meetingSession.endCurrentMeeting(summary: summary)
+            startNewComposer()
+            return
+        case .meetingSummary:
+            let summary = TaskTextFormatter.formattedNote(composer.rawInput)
+            try? meetingSession.updateActiveMeetingSummary(summary)
+            startNewComposer()
+            return
+        default:
+            break
+        }
+
         let title = resolvedTitle
         guard !title.isEmpty else { return }
 
@@ -959,7 +1949,8 @@ struct MainTaskListView: View {
                 queue: resolvedQueue,
                 person: person,
                 dueDate: dueDate,
-                note: note
+                note: note,
+                meetingId: composerMeetingId
             )
         }
 
@@ -967,17 +1958,108 @@ struct MainTaskListView: View {
     }
 
     private func beginEditing(_ task: Task) {
-        composer = TaskComposerState.edit(task: task)
+        viewModel.selectedTaskIDs = [task.id]
+        resetTaskDetailDraft(from: task)
+        focusedComposerField = nil
+    }
+
+    private func syncTaskDetailDraftFromSelection(force: Bool = false) {
+        guard let task = singleSelectedTask else {
+            taskDetailDraft = nil
+            return
+        }
+        if force || taskDetailDraft?.id != task.id {
+            resetTaskDetailDraft(from: task)
+        }
+    }
+
+    private func resetTaskDetailDraft(from task: Task) {
+        taskDetailDraft = TaskDetailDraft(task: task, dueFormatter: dueFieldFormatter)
+    }
+
+    private func taskDetailBinding<Value>(_ keyPath: WritableKeyPath<TaskDetailDraft, Value>, default fallback: Value) -> Binding<Value> {
+        Binding(
+            get: { taskDetailDraft?[keyPath: keyPath] ?? fallback },
+            set: { newValue in
+                guard taskDetailDraft != nil else { return }
+                taskDetailDraft![keyPath: keyPath] = newValue
+            }
+        )
+    }
+
+    private func applyNaturalTaskDetailInput() {
+        guard let naturalInput = taskDetailDraft?.naturalInput.trimmingCharacters(in: .whitespacesAndNewlines),
+              !naturalInput.isEmpty else {
+            return
+        }
+
+        let parsed = TaskParser.parse(naturalInput, fallbackToRawTitle: false)
+        if !parsed.title.isEmpty {
+            taskDetailDraft?.title = parsed.title
+        }
+        taskDetailDraft?.queue = parsed.queue
+        taskDetailDraft?.person = parsed.person ?? ""
+        taskDetailDraft?.note = parsed.note ?? ""
+        if let due = parsed.dueDate {
+            taskDetailDraft?.dueDate = due
+            taskDetailDraft?.dueText = dueFieldFormatter.string(from: due)
+        } else {
+            taskDetailDraft?.dueDate = nil
+            taskDetailDraft?.dueText = ""
+        }
+    }
+
+    private func saveTaskDetailEdits() {
+        guard let draft = taskDetailDraft else { return }
+        let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+
+        let dueText = draft.dueText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dueDate: Date?
+        if dueText.isEmpty {
+            dueDate = nil
+        } else if let parsed = parseDatePhrase(dueText, baseDate: draft.dueDate) {
+            dueDate = parsed
+        } else {
+            dueDate = draft.dueDate
+        }
+
+        let rawInput = draft.naturalInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        viewModel.updateTask(
+            id: draft.id,
+            rawInput: rawInput.isEmpty ? title : rawInput,
+            title: title,
+            queue: draft.queue,
+            status: draft.status,
+            person: TaskTextFormatter.formattedPerson(draft.person),
+            dueDate: dueDate,
+            note: TaskTextFormatter.formattedNote(draft.note)
+        )
+
+        if let selected = singleSelectedTask, selected.id == draft.id {
+            resetTaskDetailDraft(from: selected)
+        }
+    }
+
+    private func startNewComposer() {
+        let defaultQueue = defaultComposerQueue(for: viewModel.selectedItem) ?? settings.defaultQueue
+        composer = TaskComposerState.capture(defaultQueue: defaultQueue)
         selectedMetadataField = .main
         syncMetadataEditorInputFromSelection()
         focusPrompt()
     }
 
-    private func startNewComposer() {
-        composer = TaskComposerState.capture(defaultQueue: settings.defaultQueue)
-        selectedMetadataField = .main
-        syncMetadataEditorInputFromSelection()
-        focusPrompt()
+    private func defaultComposerQueue(for item: TaskListViewModel.SidebarItem) -> TaskQueue? {
+        switch item {
+        case .work:
+            return .work
+        case .followUp:
+            return .reachOut
+        case .inbox:
+            return .thought
+        default:
+            return nil
+        }
     }
 
     private func focusPrompt() {
@@ -1002,6 +2084,11 @@ struct MainTaskListView: View {
     }
 
     private func metadataFieldsForTabCycle() -> [MetadataField] {
+        if composer.command?.kind == .meetingStart ||
+            composer.command?.kind == .meetingEnd ||
+            composer.command?.kind == .meetingSummary {
+            return [.main]
+        }
         var fields: [MetadataField] = [.main, .queue, .due, .note]
         if composer.isEditing {
             fields.append(.status)
@@ -1010,34 +2097,37 @@ struct MainTaskListView: View {
     }
 
     private func focusSelectedMetadataField() {
-        if selectedMetadataField == .main {
-            focusedComposerField = .main
-        } else {
-            focusedComposerField = .auxiliary
-        }
+        focusedComposerField = .main
     }
 
     private func syncMetadataEditorInputFromSelection() {
         switch selectedMetadataField {
-        case .main:
-            metadataEditorInput = composer.rawInput
-        case .queue:
-            metadataEditorInput = composer.queue == .work ? "work" : "follow up"
-        case .due:
-            metadataEditorInput = composer.dueText
-        case .note:
-            metadataEditorInput = composer.note
-        case .status:
-            metadataEditorInput = composer.status.rawValue
+        case .main: metadataEditorInput = composer.rawInput
+        case .queue: metadataEditorInput = queueInputLabel(composer.queue)
+        case .due: metadataEditorInput = composer.dueText
+        case .note: metadataEditorInput = composer.note
+        case .status: metadataEditorInput = composer.status.rawValue
         }
     }
 
     private func applyMetadataEditorInput() {
         switch selectedMetadataField {
         case .main:
+            if let consumed = InputCommandParser.consumeLeadingCommand(from: metadataEditorInput) {
+                composer.command = consumed.command
+                if case let .queue(queue) = consumed.command.kind {
+                    composer.queue = queue
+                }
+                if metadataEditorInput != consumed.remainder {
+                    metadataEditorInput = consumed.remainder
+                }
+                composer.rawInput = consumed.remainder
+                return
+            }
             composer.rawInput = metadataEditorInput
         case .queue:
             if let parsedQueue = parseQueueValue(metadataEditorInput) {
+                composer.command = nil
                 composer.queue = parsedQueue
             }
         case .due:
@@ -1045,7 +2135,7 @@ struct MainTaskListView: View {
             let trimmed = metadataEditorInput.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
                 composer.dueDate = nil
-            } else if let parsed = parseDatePhrase(trimmed) {
+            } else if let parsed = parseDatePhrase(trimmed, baseDate: composer.dueDate) {
                 composer.dueDate = parsed
             }
         case .note:
@@ -1060,8 +2150,13 @@ struct MainTaskListView: View {
     private func cycleValueIfApplicable(for field: MetadataField) {
         switch field {
         case .queue:
-            composer.queue = composer.queue == .work ? .reachOut : .work
-            metadataEditorInput = composer.queue == .work ? "work" : "follow up"
+            composer.command = nil
+            switch composer.queue {
+            case .work: composer.queue = .reachOut
+            case .reachOut: composer.queue = .thought
+            case .thought: composer.queue = .work
+            }
+            metadataEditorInput = queueInputLabel(composer.queue)
         case .status where composer.isEditing:
             let next: TaskStatus
             switch composer.status {
@@ -1078,14 +2173,20 @@ struct MainTaskListView: View {
         }
     }
 
+    // MARK: - Keyboard Handlers
+
     private func handleEscape() {
+        if viewModel.selectedItem == .inbox, selectedInboxThoughtID != nil {
+            closeThoughtEditor()
+            return
+        }
         if composer.isEditing {
             startNewComposer()
             focusedComposerField = nil
         } else if focusedComposerField != nil {
             focusedComposerField = nil
         } else if viewModel.hasSelection {
-            withAnimation(.easeOut(duration: 0.15)) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 viewModel.clearSelection()
             }
         } else {
@@ -1102,26 +2203,6 @@ struct MainTaskListView: View {
     private func handleListArrowDown() -> Bool {
         guard focusedComposerField == nil else { return false }
         viewModel.moveSelectionDown()
-        return true
-    }
-
-    private func handleArrowLeft() -> Bool {
-        guard focusedComposerField == nil else { return false }
-        let tabs = TaskListViewModel.Tab.allCases
-        guard let index = tabs.firstIndex(of: viewModel.selectedTab), index > 0 else { return false }
-        withAnimation(.easeOut(duration: 0.15)) {
-            viewModel.selectedTab = tabs[index - 1]
-        }
-        return true
-    }
-
-    private func handleArrowRight() -> Bool {
-        guard focusedComposerField == nil else { return false }
-        let tabs = TaskListViewModel.Tab.allCases
-        guard let index = tabs.firstIndex(of: viewModel.selectedTab), index < tabs.count - 1 else { return false }
-        withAnimation(.easeOut(duration: 0.15)) {
-            viewModel.selectedTab = tabs[index + 1]
-        }
         return true
     }
 
@@ -1142,6 +2223,13 @@ struct MainTaskListView: View {
     }
 
     private func handleListDelete() -> Bool {
+        if focusedComposerField == .main,
+           selectedMetadataField == .main,
+           metadataEditorInput.isEmpty,
+           composer.command != nil {
+            composer.command = nil
+            return true
+        }
         guard focusedComposerField == nil else { return false }
         guard viewModel.hasSelection else { return false }
         if viewModel.isMultiSelect {
@@ -1158,55 +2246,13 @@ struct MainTaskListView: View {
         return true
     }
 
-    private var bulkActionsBar: some View {
-        HStack(spacing: 12) {
-            Text("\(viewModel.selectedTaskIDs.count) selected")
-                .font(.system(size: 13, weight: .bold))
-
-            Spacer()
-
-            Button("Mark Done") { viewModel.bulkMarkDone() }
-                .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .semibold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(Color.green.opacity(0.15)))
-                .overlay(Capsule().stroke(Color.green.opacity(0.3), lineWidth: 1))
-
-            Button("Snooze") { viewModel.bulkSnooze() }
-                .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .semibold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(Color.orange.opacity(0.15)))
-                .overlay(Capsule().stroke(Color.orange.opacity(0.3), lineWidth: 1))
-
-            Button("Delete") { showDeleteConfirmation = true }
-                .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.red)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(Color.red.opacity(0.15)))
-                .overlay(Capsule().stroke(Color.red.opacity(0.3), lineWidth: 1))
-
-            Button("Deselect") { withAnimation { viewModel.clearSelection() } }
-                .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(Color.gray.opacity(0.12)))
-                .overlay(Capsule().stroke(Color.gray.opacity(0.25), lineWidth: 1))
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(glassPanel(cornerRadius: 12))
-        .shadow(color: Color.black.opacity(0.04), radius: 8, y: 3)
-    }
+    // MARK: - Utility
 
     private func parseQueueValue(_ input: String) -> TaskQueue? {
         let normalized = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized.contains("thought") || normalized.contains("note") || normalized.contains("inbox") || normalized == "n" || normalized == "//" {
+            return .thought
+        }
         if normalized.contains("follow") || normalized.contains("reach") || normalized == "r" {
             return .reachOut
         }
@@ -1214,6 +2260,45 @@ struct MainTaskListView: View {
             return .work
         }
         return nil
+    }
+
+    private func queueInputLabel(_ queue: TaskQueue) -> String {
+        switch queue {
+        case .work: return "work"
+        case .reachOut: return "follow up"
+        case .thought: return "note"
+        }
+    }
+
+    private func queueColor(_ queue: TaskQueue) -> Color {
+        switch queue {
+        case .work: return .orange
+        case .reachOut: return .blue
+        case .thought: return .indigo
+        }
+    }
+
+    private func commandColor(for command: InputCommand) -> Color {
+        switch command.kind {
+        case let .queue(queue): return queueColor(queue)
+        case .meetingStart, .meetingEnd, .meetingSummary: return .purple
+        case .today: return .orange
+        }
+    }
+
+    private func commandIcon(for command: InputCommand) -> String {
+        switch command.kind {
+        case let .queue(queue):
+            switch queue {
+            case .work: return "checkmark.square.fill"
+            case .reachOut: return "arrowshape.turn.up.right.fill"
+            case .thought: return "brain.head.profile"
+            }
+        case .meetingStart: return "video.fill"
+        case .meetingEnd: return "record.circle"
+        case .meetingSummary: return "text.bubble"
+        case .today: return "sun.max.fill"
+        }
     }
 
     private func parseStatusValue(_ input: String) -> TaskStatus? {
@@ -1228,13 +2313,44 @@ struct MainTaskListView: View {
     private var dueFieldFormatter: DateFormatter {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
-        formatter.timeStyle = .none
+        formatter.timeStyle = .short
         return formatter
+    }
+}
+
+// MARK: - Supporting Types
+
+private struct RegexCaptureMatch {
+    let captures: [String?]
+}
+
+private struct TaskDetailDraft {
+    var id: String
+    var naturalInput: String
+    var title: String
+    var queue: TaskQueue
+    var status: TaskStatus
+    var person: String
+    var dueText: String
+    var dueDate: Date?
+    var note: String
+
+    init(task: Task, dueFormatter: DateFormatter) {
+        id = task.id
+        naturalInput = task.rawInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? task.title : task.rawInput
+        title = task.title
+        queue = task.queue
+        status = task.status
+        person = task.person ?? ""
+        dueText = task.dueDateValue.map(dueFormatter.string(from:)) ?? ""
+        dueDate = task.dueDateValue
+        note = task.note ?? ""
     }
 }
 
 private struct TaskComposerState {
     var editingTaskID: String?
+    var command: InputCommand?
     var rawInput: String
     var queue: TaskQueue
     var status: TaskStatus
@@ -1250,6 +2366,7 @@ private struct TaskComposerState {
     static func capture(defaultQueue: TaskQueue) -> TaskComposerState {
         TaskComposerState(
             editingTaskID: nil,
+            command: nil,
             rawInput: "",
             queue: defaultQueue,
             status: .active,
@@ -1263,10 +2380,11 @@ private struct TaskComposerState {
     static func edit(task: Task) -> TaskComposerState {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
-        formatter.timeStyle = .none
+        formatter.timeStyle = .short
 
         return TaskComposerState(
             editingTaskID: task.id,
+            command: nil,
             rawInput: task.title,
             queue: task.queue,
             status: task.status,
@@ -1278,14 +2396,14 @@ private struct TaskComposerState {
     }
 }
 
+// MARK: - Key Monitor
+
 private struct MainPromptKeyMonitor: NSViewRepresentable {
     var onEscape: () -> Void
     var onFocusPrompt: () -> Void
     var onTab: (_ reverse: Bool) -> Void
     var onArrowUp: () -> Bool
     var onArrowDown: () -> Bool
-    var onArrowLeft: () -> Bool
-    var onArrowRight: () -> Bool
     var onEnter: () -> Bool
     var onSpace: () -> Bool
     var onDelete: () -> Bool
@@ -1298,8 +2416,6 @@ private struct MainPromptKeyMonitor: NSViewRepresentable {
         view.onTab = onTab
         view.onArrowUp = onArrowUp
         view.onArrowDown = onArrowDown
-        view.onArrowLeft = onArrowLeft
-        view.onArrowRight = onArrowRight
         view.onEnter = onEnter
         view.onSpace = onSpace
         view.onDelete = onDelete
@@ -1314,8 +2430,6 @@ private struct MainPromptKeyMonitor: NSViewRepresentable {
         view.onTab = onTab
         view.onArrowUp = onArrowUp
         view.onArrowDown = onArrowDown
-        view.onArrowLeft = onArrowLeft
-        view.onArrowRight = onArrowRight
         view.onEnter = onEnter
         view.onSpace = onSpace
         view.onDelete = onDelete
@@ -1329,8 +2443,6 @@ private final class MainPromptKeyMonitorView: NSView {
     var onTab: ((Bool) -> Void)?
     var onArrowUp: (() -> Bool)?
     var onArrowDown: (() -> Bool)?
-    var onArrowLeft: (() -> Bool)?
-    var onArrowRight: (() -> Bool)?
     var onEnter: (() -> Bool)?
     var onSpace: (() -> Bool)?
     var onDelete: (() -> Bool)?
@@ -1374,7 +2486,7 @@ private final class MainPromptKeyMonitorView: NSView {
                 return nil
             }
 
-            // Cmd+A: select all (pass through if not handled)
+            // Cmd+A: select all
             if event.keyCode == 0 && modifiers == .command {
                 if self.onSelectAll?() == true { return nil }
                 return event
@@ -1392,18 +2504,6 @@ private final class MainPromptKeyMonitorView: NSView {
                 return event
             }
 
-            // Arrow Left
-            if event.keyCode == 123 && modifiers.isEmpty {
-                if self.onArrowLeft?() == true { return nil }
-                return event
-            }
-
-            // Arrow Right
-            if event.keyCode == 124 && modifiers.isEmpty {
-                if self.onArrowRight?() == true { return nil }
-                return event
-            }
-
             // Enter
             if event.keyCode == 36 && modifiers.isEmpty {
                 if self.onEnter?() == true { return nil }
@@ -1416,13 +2516,120 @@ private final class MainPromptKeyMonitorView: NSView {
                 return event
             }
 
-            // Delete/Backspace
-            if event.keyCode == 51 && modifiers.isEmpty {
+            // Cmd+Delete
+            if event.keyCode == 51 && modifiers == .command {
                 if self.onDelete?() == true { return nil }
                 return event
             }
 
             return event
         }
+    }
+}
+
+// MARK: - Thought Row
+
+private struct ThoughtRowView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let thought: Task
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onDelete: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button {
+            onSelect()
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "bubble.left")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Color.indigo.opacity(0.6))
+                    .frame(width: 18)
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(thought.title)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let created = thought.createdAtValue {
+                        Text(RelativeDateTimeFormatter().localizedString(for: created, relativeTo: .now))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: isSelected ? "pencil.circle.fill" : "pencil")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(.thinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(
+                                isSelected
+                                    ? LinearGradient(
+                                        colors: selectedGradientColors,
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                    : LinearGradient(
+                                        colors: rowGradientColors,
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                            )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(isSelected ? Color.accentColor.opacity(0.3) : rowStrokeColor, lineWidth: 1)
+                    )
+                    .animation(.easeOut(duration: 0.15), value: isHovering)
+            )
+            .shadow(color: Color.black.opacity(0.04), radius: 6, y: 2)
+            .onHover { hovering in
+                isHovering = hovering
+            }
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Edit Note") { onSelect() }
+            Button(role: .destructive) { onDelete() } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        .draggable("jot-task:\(thought.id)")
+    }
+
+    private var selectedGradientColors: [Color] {
+        if colorScheme == .dark {
+            return [Color.accentColor.opacity(0.10), Color.accentColor.opacity(0.05)]
+        }
+        return [Color.accentColor.opacity(0.08), Color.accentColor.opacity(0.04)]
+    }
+
+    private var rowStrokeColor: Color {
+        if colorScheme == .dark {
+            return Color.white.opacity(isHovering ? 0.16 : 0.08)
+        } else {
+            return Color.black.opacity(isHovering ? 0.14 : 0.08)
+        }
+    }
+
+    private var rowGradientColors: [Color] {
+        if colorScheme == .dark {
+            return [Color.white.opacity(isHovering ? 0.13 : 0.11), Color.white.opacity(isHovering ? 0.07 : 0.05)]
+        }
+        return [Color.white.opacity(isHovering ? 0.98 : 0.92), Color.white.opacity(isHovering ? 0.82 : 0.70)]
     }
 }

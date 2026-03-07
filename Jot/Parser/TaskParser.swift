@@ -1,6 +1,17 @@
 import Foundation
 
 enum TaskParser {
+    static let defaultDueHour = 9
+    static let defaultDueMinute = 0
+
+    static func consumeLeadingModePrefix(from input: String) -> (queue: TaskQueue, remainder: String)? {
+        guard let consumed = InputCommandParser.consumeLeadingCommand(from: input) else {
+            return nil
+        }
+        guard case let .queue(queue) = consumed.command.kind else { return nil }
+        return (queue, consumed.remainder)
+    }
+
     static func parse(
         _ input: String,
         now: Date = .now,
@@ -13,11 +24,21 @@ enum TaskParser {
         }
 
         var working = raw
-
-        // Check for thought prefix (/t or //)
-        if isThoughtPrefix(working) {
-            let stripped = strippingThoughtPrefix(working)
-            return ParsedTask(rawInput: raw, title: stripped.isEmpty ? raw : stripped, type: .thought, queue: .work, person: nil, dueDate: nil, note: nil)
+        let leadingMode = consumeLeadingModePrefix(from: working)
+        if let leadingMode {
+            working = leadingMode.remainder
+            if leadingMode.queue == .thought {
+                let title = cleanupTitle(working)
+                return ParsedTask(
+                    rawInput: raw,
+                    title: title,
+                    type: .thought,
+                    queue: .thought,
+                    person: nil,
+                    dueDate: nil,
+                    note: nil
+                )
+            }
         }
 
         let override = queueOverride(in: working)
@@ -27,7 +48,9 @@ enum TaskParser {
 
         let type = detectType(in: working)
         var queue: TaskQueue
-        if let override {
+        if let leadingMode {
+            queue = leadingMode.queue
+        } else if let override {
             queue = override
         } else {
             queue = (type == .followUp) ? .reachOut : .work
@@ -46,7 +69,12 @@ enum TaskParser {
 
         let title = cleanupTitle(working)
 
-        let finalTitle = title.isEmpty && fallbackToRawTitle ? raw : title
+        let finalTitle: String
+        if title.isEmpty && fallbackToRawTitle {
+            finalTitle = leadingMode == nil ? raw : working
+        } else {
+            finalTitle = title
+        }
 
         return ParsedTask(
             rawInput: raw,
@@ -57,24 +85,6 @@ enum TaskParser {
             dueDate: dueDate,
             note: note
         )
-    }
-
-    private static func isThoughtPrefix(_ input: String) -> Bool {
-        let lower = input.lowercased()
-        return lower.hasPrefix("/t ") || lower == "/t" || input.hasPrefix("// ")
-    }
-
-    private static func strippingThoughtPrefix(_ input: String) -> String {
-        if input.lowercased().hasPrefix("/t ") {
-            return String(input.dropFirst(3)).trimmingCharacters(in: .whitespaces)
-        }
-        if input.lowercased() == "/t" {
-            return ""
-        }
-        if input.hasPrefix("// ") {
-            return String(input.dropFirst(3)).trimmingCharacters(in: .whitespaces)
-        }
-        return input
     }
 
     private static func queueOverride(in input: String) -> TaskQueue? {
@@ -105,6 +115,22 @@ enum TaskParser {
     private static func extractDate(from input: String, now: Date, calendar: Calendar) -> (Date?, String) {
         let lower = input.lowercased()
 
+        if let matched = firstMatch(#"\bin\s+(\d{1,3})\s+(hour|hours|hr|hrs|minute|minutes|min|mins)\b"#, in: lower),
+           let valueToken = matched.captures[0],
+           let value = Int(valueToken) {
+            let unit = matched.captures[1] ?? "hours"
+            let component: Calendar.Component = unit.hasPrefix("min") ? .minute : .hour
+            let date = calendar.date(byAdding: component, value: value, to: now)
+            return (date, removeToken(from: input, lower: lower, range: matched.range))
+        }
+
+        func finalizeDate(_ day: Date, dateRange: NSRange) -> (Date?, String) {
+            let withoutDate = removeToken(from: input, lower: lower, range: dateRange)
+            let (timeComponents, withoutTime) = extractTime(from: withoutDate)
+            let resolvedDate = applyingTime(timeComponents, to: day, calendar: calendar)
+            return (resolvedDate, withoutTime)
+        }
+
         let quickTokens: [(String, Int)] = [
             ("today", 0),
             ("tonight", 0),
@@ -114,8 +140,8 @@ enum TaskParser {
 
         for token in quickTokens {
             if let range = findTokenRange(token.0, in: lower) {
-                let date = calendar.date(byAdding: .day, value: token.1, to: calendar.startOfDay(for: now))
-                return (date, removeToken(from: input, lower: lower, range: range))
+                guard let day = calendar.date(byAdding: .day, value: token.1, to: now) else { continue }
+                return finalizeDate(day, dateRange: range)
             }
         }
 
@@ -130,25 +156,25 @@ enum TaskParser {
                matchingPolicy: .nextTime,
                direction: .forward
            ) {
-            return (date, removeToken(from: input, lower: lower, range: matched.range))
+            return finalizeDate(date, dateRange: matched.range)
         }
 
         if let range = findTokenRange("next week", in: lower),
-           let date = calendar.date(byAdding: .day, value: 7, to: calendar.startOfDay(for: now)) {
-            return (date, removeToken(from: input, lower: lower, range: range))
+           let date = calendar.date(byAdding: .day, value: 7, to: now) {
+            return finalizeDate(date, dateRange: range)
         }
 
         if let range = findTokenRange("next month", in: lower),
-           let date = calendar.date(byAdding: .month, value: 1, to: calendar.startOfDay(for: now)) {
-            return (date, removeToken(from: input, lower: lower, range: range))
+           let date = calendar.date(byAdding: .month, value: 1, to: now) {
+            return finalizeDate(date, dateRange: range)
         }
 
         if let range = findTokenRange("end of week", in: lower) {
-            let start = calendar.startOfDay(for: now)
-            let weekday = calendar.component(.weekday, from: start)
+            let weekday = calendar.component(.weekday, from: now)
             let daysUntilSunday = (8 - weekday) % 7
-            let target = calendar.date(byAdding: .day, value: daysUntilSunday, to: start)
-            return (target, removeToken(from: input, lower: lower, range: range))
+            if let target = calendar.date(byAdding: .day, value: daysUntilSunday, to: now) {
+                return finalizeDate(target, dateRange: range)
+            }
         }
 
         if let range = findTokenRange("end of month", in: lower) {
@@ -156,7 +182,9 @@ enum TaskParser {
             components.month = (components.month ?? 1) + 1
             components.day = 0
             let target = calendar.date(from: components)
-            return (target, removeToken(from: input, lower: lower, range: range))
+            if let target {
+                return finalizeDate(target, dateRange: range)
+            }
         }
 
         if let matched = firstMatch(#"\bin\s+(\d{1,2})\s+(day|days|week|weeks|month|months)\b"#, in: lower) {
@@ -172,8 +200,9 @@ enum TaskParser {
                 component = .day
             }
             let amount = (unit == "week" || unit == "weeks") ? value * 7 : value
-            let date = calendar.date(byAdding: component, value: amount, to: calendar.startOfDay(for: now))
-            return (date, removeToken(from: input, lower: lower, range: matched.range))
+            if let date = calendar.date(byAdding: component, value: amount, to: now) {
+                return finalizeDate(date, dateRange: matched.range)
+            }
         }
 
         let weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -185,8 +214,9 @@ enum TaskParser {
                 if delta <= 0 {
                     delta += 7
                 }
-                let date = calendar.date(byAdding: .day, value: delta, to: calendar.startOfDay(for: now))
-                return (date, removeToken(from: input, lower: lower, range: range))
+                if let date = calendar.date(byAdding: .day, value: delta, to: now) {
+                    return finalizeDate(date, dateRange: range)
+                }
             }
         }
 
@@ -196,7 +226,9 @@ enum TaskParser {
            let month = monthNumber(monthToken),
            let day = Int(dayToken) {
             let candidate = absoluteDate(month: month, day: day, year: nil, now: now, calendar: calendar)
-            return (candidate, removeToken(from: input, lower: lower, range: matched.range))
+            if let candidate {
+                return finalizeDate(candidate, dateRange: matched.range)
+            }
         }
 
         if let matched = firstMatch(#"\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b"#, in: lower),
@@ -207,7 +239,9 @@ enum TaskParser {
             let yearToken = matched.captures[2].flatMap(Int.init)
             let year = normalizeYear(yearToken, currentYear: calendar.component(.year, from: now))
             let candidate = absoluteDate(month: month, day: day, year: year, now: now, calendar: calendar)
-            return (candidate, removeToken(from: input, lower: lower, range: matched.range))
+            if let candidate {
+                return finalizeDate(candidate, dateRange: matched.range)
+            }
         }
 
         if let matched = firstMatch(#"\bthe\s+(\d{1,2})(?:st|nd|rd|th)\b"#, in: lower),
@@ -215,7 +249,34 @@ enum TaskParser {
            let day = Int(dayToken) {
             let nowMonth = calendar.component(.month, from: now)
             let candidate = absoluteDate(month: nowMonth, day: day, year: nil, now: now, calendar: calendar)
-            return (candidate, removeToken(from: input, lower: lower, range: matched.range))
+            if let candidate {
+                return finalizeDate(candidate, dateRange: matched.range)
+            }
+        }
+
+        return (nil, input)
+    }
+
+    private static func extractTime(from input: String) -> (DateComponents?, String) {
+        let lower = input.lowercased()
+
+        if let matched = firstMatch(#"\b(?:at|by|around)?\s*(\d{1,2})(?::([0-5]\d))?\s*([ap])\.?m\.?\b"#, in: lower),
+           let hourToken = matched.captures[0],
+           let rawHour = Int(hourToken),
+           (1...12).contains(rawHour) {
+            let minute = Int(matched.captures[1] ?? "") ?? 0
+            let meridiem = matched.captures[2] ?? "a"
+            let normalizedHour = (rawHour % 12) + (meridiem == "p" ? 12 : 0)
+            let remaining = removeToken(from: input, lower: lower, range: matched.range)
+            return (DateComponents(hour: normalizedHour, minute: minute, second: 0), remaining)
+        }
+
+        if let matched = firstMatch(#"\b(?:at|by|around)\s+([01]?\d|2[0-3])(?::([0-5]\d))?\b"#, in: lower),
+           let hourToken = matched.captures[0],
+           let hour = Int(hourToken) {
+            let minute = Int(matched.captures[1] ?? "") ?? 0
+            let remaining = removeToken(from: input, lower: lower, range: matched.range)
+            return (DateComponents(hour: hour, minute: minute, second: 0), remaining)
         }
 
         return (nil, input)
@@ -366,7 +427,9 @@ enum TaskParser {
         var components = calendar.dateComponents([.year], from: now)
         components.month = month
         components.day = day
-        components.hour = 9
+        components.hour = defaultDueHour
+        components.minute = defaultDueMinute
+        components.second = 0
 
         if let year {
             components.year = year
@@ -383,6 +446,23 @@ enum TaskParser {
 
         components.year = (components.year ?? 0) + 1
         return calendar.date(from: components)
+    }
+
+    private static func defaultDueDate(on day: Date, calendar: Calendar) -> Date {
+        let start = calendar.startOfDay(for: day)
+        return calendar.date(byAdding: DateComponents(hour: defaultDueHour, minute: defaultDueMinute), to: start) ?? start
+    }
+
+    private static func applyingTime(_ time: DateComponents?, to day: Date, calendar: Calendar) -> Date {
+        guard let time else {
+            return defaultDueDate(on: day, calendar: calendar)
+        }
+
+        var components = calendar.dateComponents([.year, .month, .day], from: day)
+        components.hour = time.hour
+        components.minute = time.minute
+        components.second = 0
+        return calendar.date(from: components) ?? defaultDueDate(on: day, calendar: calendar)
     }
 }
 

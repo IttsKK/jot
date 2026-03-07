@@ -90,6 +90,34 @@ final class DatabaseManagerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: dbURL.path))
     }
 
+    func testDailyFocusItemCreateToggleAndDelete() throws {
+        let item = try db.createDailyFocusItem(title: "Ship patch", dayKey: "2026-03-03")
+        var items = try db.fetchDailyFocusItems(dayKey: "2026-03-03")
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items.first?.id, item.id)
+        XCTAssertEqual(items.first?.isDone, false)
+
+        try db.toggleDailyFocusDone(id: item.id)
+        items = try db.fetchDailyFocusItems(dayKey: "2026-03-03")
+        XCTAssertEqual(items.first?.isDone, true)
+
+        try db.deleteDailyFocusItem(id: item.id)
+        items = try db.fetchDailyFocusItems(dayKey: "2026-03-03")
+        XCTAssertTrue(items.isEmpty)
+    }
+
+    func testCreateDailyFocusFromTaskDeduplicatesByDay() throws {
+        let task = try db.createTask(rawInput: "email Dana", title: "email Dana", queue: .reachOut)
+
+        let first = try db.createDailyFocusItem(from: task, dayKey: "2026-03-03")
+        let second = try db.createDailyFocusItem(from: task, dayKey: "2026-03-03")
+        XCTAssertEqual(first.id, second.id)
+
+        let items = try db.fetchDailyFocusItems(dayKey: "2026-03-03")
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items.first?.sourceTaskId, task.id)
+    }
+
     private func date(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int) -> Date {
         var components = DateComponents()
         components.year = year

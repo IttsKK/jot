@@ -10,7 +10,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         let host = NSHostingController(rootView: root)
         let window = NSWindow(contentViewController: host)
         window.title = "Jot"
-        window.setContentSize(NSSize(width: 920, height: 620))
+        window.setContentSize(NSSize(width: 1060, height: 660))
         window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
         window.isReleasedWhenClosed = false
         super.init(window: window)

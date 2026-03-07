@@ -10,7 +10,7 @@ enum TaskQueue: String, Codable, CaseIterable, Sendable, DatabaseValueConvertibl
         switch self {
         case .work: return "Work"
         case .reachOut: return "Follow Up"
-        case .thought: return "Thought"
+        case .thought: return "Note"
         }
     }
 }

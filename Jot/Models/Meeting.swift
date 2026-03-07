@@ -7,6 +7,7 @@ struct Meeting: Codable, FetchableRecord, MutablePersistableRecord, Identifiable
     var id: String
     var title: String
     var attendees: String?
+    var summary: String?
     var startedAt: String
     var endedAt: String?
 
@@ -14,6 +15,7 @@ struct Meeting: Codable, FetchableRecord, MutablePersistableRecord, Identifiable
         static let id = Column("id")
         static let title = Column("title")
         static let attendees = Column("attendees")
+        static let summary = Column("summary")
         static let startedAt = Column("started_at")
         static let endedAt = Column("ended_at")
     }
@@ -22,6 +24,7 @@ struct Meeting: Codable, FetchableRecord, MutablePersistableRecord, Identifiable
         case id
         case title
         case attendees
+        case summary
         case startedAt = "started_at"
         case endedAt = "ended_at"
     }
@@ -30,12 +33,14 @@ struct Meeting: Codable, FetchableRecord, MutablePersistableRecord, Identifiable
         id: String = UUID().uuidString,
         title: String,
         attendees: String? = nil,
+        summary: String? = nil,
         startedAt: Date = .now,
         endedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
         self.attendees = attendees
+        self.summary = summary
         self.startedAt = DateCodec.string(from: startedAt)
         self.endedAt = endedAt.map(DateCodec.string(from:))
     }

@@ -11,6 +11,7 @@ final class StatusBarController: NSObject {
     private var observers: [NSObjectProtocol] = []
 
     var onOpenApp: (() -> Void)?
+    var onOpenDailyFocus: (() -> Void)?
     var onOpenSettings: (() -> Void)?
     var onCheckForUpdates: (() -> Void)?
     var canCheckForUpdates: Bool = false
@@ -55,6 +56,10 @@ final class StatusBarController: NSObject {
         onOpenApp?()
     }
 
+    @objc private func openDailyFocus() {
+        onOpenDailyFocus?()
+    }
+
     @objc private func openSettings() {
         onOpenSettings?()
     }
@@ -70,7 +75,7 @@ final class StatusBarController: NSObject {
     @objc private func startMeeting() {
         let alert = NSAlert()
         alert.messageText = "Start Meeting"
-        alert.informativeText = "Enter meeting name and attendees (optional, comma-separated)."
+        alert.informativeText = "Enter a meeting title and who it's with (optional)."
         alert.addButton(withTitle: "Start")
         alert.addButton(withTitle: "Cancel")
 
@@ -79,11 +84,11 @@ final class StatusBarController: NSObject {
         stack.spacing = 8
 
         let titleField = NSTextField(frame: NSRect(x: 0, y: 28, width: 300, height: 24))
-        titleField.placeholderString = "Meeting name"
+        titleField.placeholderString = "Meeting title"
         titleField.bezelStyle = .roundedBezel
 
         let attendeesField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-        attendeesField.placeholderString = "Attendees (e.g. Sarah, John)"
+        attendeesField.placeholderString = "With (optional)"
         attendeesField.bezelStyle = .roundedBezel
 
         stack.addArrangedSubview(titleField)
@@ -147,6 +152,7 @@ final class StatusBarController: NSObject {
         menu.addItem(.separator())
         menu.addItem(makeQuickAddMenuItem())
         menu.addItem(makeOpenAppMenuItem())
+        menu.addItem(NSMenuItem(title: "Open Today Focus List", action: #selector(openDailyFocus), keyEquivalent: "d"))
         menu.addItem(NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: ","))
         let checkForUpdatesItem = NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: "")
         checkForUpdatesItem.isEnabled = canCheckForUpdates

@@ -16,6 +16,7 @@ struct Task: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, E
     var createdAt: String
     var position: Int64
     var meetingId: String?
+    var dailyFocusDate: String?
 
     enum Columns {
         static let id = Column("id")
@@ -30,6 +31,7 @@ struct Task: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, E
         static let createdAt = Column("created_at")
         static let position = Column("position")
         static let meetingId = Column("meeting_id")
+        static let dailyFocusDate = Column("daily_focus_date")
     }
 
     enum CodingKeys: String, CodingKey {
@@ -45,6 +47,7 @@ struct Task: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, E
         case createdAt = "created_at"
         case position
         case meetingId = "meeting_id"
+        case dailyFocusDate = "daily_focus_date"
     }
 
     init(
@@ -59,7 +62,8 @@ struct Task: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, E
         doneAt: Date? = nil,
         createdAt: Date = .now,
         position: Int64 = 0,
-        meetingId: String? = nil
+        meetingId: String? = nil,
+        dailyFocusDate: String? = nil
     ) {
         self.id = id
         self.rawInput = rawInput
@@ -73,9 +77,14 @@ struct Task: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, E
         self.createdAt = DateCodec.string(from: createdAt)
         self.position = position
         self.meetingId = meetingId
+        self.dailyFocusDate = dailyFocusDate
     }
 
     var dueDateValue: Date? { DateCodec.date(from: dueDate) }
     var doneAtValue: Date? { DateCodec.date(from: doneAt) }
     var createdAtValue: Date? { DateCodec.date(from: createdAt) }
+
+    var isInDailyFocus: Bool {
+        dailyFocusDate == DatabaseManager.dayKey(for: .now)
+    }
 }

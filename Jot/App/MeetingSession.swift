@@ -21,6 +21,10 @@ final class MeetingSession: ObservableObject {
         activeMeeting?.attendeeList ?? []
     }
 
+    var meetingSummary: String? {
+        activeMeeting?.summary
+    }
+
     func startMeeting(title: String, attendees: String?) throws {
         // End any currently active meeting first
         if let current = activeMeeting {
@@ -30,9 +34,16 @@ final class MeetingSession: ObservableObject {
         activeMeeting = meeting
     }
 
-    func endCurrentMeeting() throws {
+    func updateActiveMeetingSummary(_ summary: String?) throws {
+        guard var meeting = activeMeeting else { return }
+        meeting.summary = summary
+        try database.updateMeeting(meeting)
+        activeMeeting = meeting
+    }
+
+    func endCurrentMeeting(summary: String? = nil) throws {
         guard let meeting = activeMeeting else { return }
-        try database.endMeeting(id: meeting.id)
+        try database.endMeeting(id: meeting.id, summary: summary)
         activeMeeting = nil
     }
 }

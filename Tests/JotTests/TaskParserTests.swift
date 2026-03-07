@@ -34,10 +34,24 @@ final class TaskParserTests: XCTestCase {
         XCTAssertEqual(parsed.queue, .work)
     }
 
+    func testLeadingModePrefixWithoutSpaceIsConsumed() {
+        let parsed = TaskParser.parse("/w", now: baselineNow, calendar: calendar)
+        XCTAssertEqual(parsed.queue, .work)
+        XCTAssertEqual(parsed.title, "")
+    }
+
+    func testLeadingThoughtModePrefixSetsThoughtQueue() {
+        let parsed = TaskParser.parse("/n idea to revisit", now: baselineNow, calendar: calendar)
+        XCTAssertEqual(parsed.queue, .thought)
+        XCTAssertEqual(parsed.type, .thought)
+        XCTAssertEqual(parsed.title, "idea to revisit")
+    }
+
     func testDateExtractionAndTitleCleanup() {
         let parsed = TaskParser.parse("send update by tomorrow", now: baselineNow, calendar: calendar)
         XCTAssertEqual(parsed.title, "send update")
         XCTAssertEqual(dayString(parsed.dueDate), "2026-03-04")
+        XCTAssertEqual(timeString(parsed.dueDate), "09:00")
     }
 
     func testAbsoluteDateAndDescriptionExtraction() {
@@ -57,6 +71,23 @@ final class TaskParserTests: XCTestCase {
     func testInDaysParsing() {
         let parsed = TaskParser.parse("draft report in 3 days", now: baselineNow, calendar: calendar)
         XCTAssertEqual(dayString(parsed.dueDate), "2026-03-06")
+        XCTAssertEqual(timeString(parsed.dueDate), "09:00")
+    }
+
+    func testInHoursParsing() {
+        let parsed = TaskParser.parse("follow up in 12 hours", now: baselineNow, calendar: calendar)
+        XCTAssertEqual(dayString(parsed.dueDate), "2026-03-03")
+        XCTAssertEqual(timeString(parsed.dueDate), "21:00")
+        XCTAssertEqual(parsed.title, "follow up")
+    }
+
+    func testTomorrowAtTwelveParsing() {
+        let parsed = TaskParser.parse("email Chris tomorrow at 12", now: baselineNow, calendar: calendar)
+        XCTAssertEqual(parsed.queue, .reachOut)
+        XCTAssertEqual(parsed.person, "Chris")
+        XCTAssertEqual(dayString(parsed.dueDate), "2026-03-04")
+        XCTAssertEqual(timeString(parsed.dueDate), "12:00")
+        XCTAssertEqual(parsed.title, "email Chris")
     }
 
     func testNextWeekWeekdayParsing() {
@@ -88,6 +119,14 @@ final class TaskParserTests: XCTestCase {
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    private func timeString(_ date: Date?) -> String {
+        guard let date else { return "" }
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.dateFormat = "HH:mm"
         return formatter.string(from: date)
     }
 }

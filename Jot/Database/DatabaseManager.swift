@@ -63,6 +63,34 @@ final class DatabaseManager {
             )
         }
 
+        migrator.registerMigration("v4_daily_focus_items") { db in
+            try db.create(table: DailyFocusItem.databaseTableName) { table in
+                table.column("id", .text).primaryKey()
+                table.column("day_key", .text).notNull()
+                table.column("title", .text).notNull()
+                table.column("is_done", .boolean).notNull().defaults(to: false)
+                table.column("source_task_id", .text)
+                table.column("created_at", .text).notNull()
+                table.column("position", .integer).notNull()
+            }
+            try db.create(index: "idx_daily_focus_day_position", on: DailyFocusItem.databaseTableName, columns: ["day_key", "position"])
+            try db.create(index: "idx_daily_focus_day_done_position", on: DailyFocusItem.databaseTableName, columns: ["day_key", "is_done", "position"])
+            try db.create(index: "idx_daily_focus_source_task", on: DailyFocusItem.databaseTableName, columns: ["source_task_id"])
+        }
+
+        migrator.registerMigration("v5_task_daily_focus") { db in
+            try db.alter(table: Task.databaseTableName) { table in
+                table.add(column: "daily_focus_date", .text)
+            }
+            try db.create(index: "idx_tasks_daily_focus_date", on: Task.databaseTableName, columns: ["daily_focus_date"])
+        }
+
+        migrator.registerMigration("v6_meeting_summary") { db in
+            try db.alter(table: Meeting.databaseTableName) { table in
+                table.add(column: "summary", .text)
+            }
+        }
+
         return migrator
     }
 
@@ -77,6 +105,7 @@ final class DatabaseManager {
         dueDate: Date? = nil,
         note: String? = nil,
         meetingId: String? = nil,
+        dailyFocusDate: String? = nil,
         now: Date = .now
     ) throws -> Task {
         var task = Task(
@@ -89,7 +118,8 @@ final class DatabaseManager {
             note: note,
             createdAt: now,
             position: try nextPosition(in: queue),
-            meetingId: meetingId
+            meetingId: meetingId,
+            dailyFocusDate: dailyFocusDate
         )
         try dbQueue.write { db in
             try task.insert(db)
@@ -115,6 +145,12 @@ final class DatabaseManager {
         try fetchTasks()
     }
 
+    func fetchTask(id: String) throws -> Task? {
+        try dbQueue.read { db in
+            try Task.fetchOne(db, key: id)
+        }
+    }
+
     func fetchTasksForMeeting(_ meetingId: String) throws -> [Task] {
         try dbQueue.read { db in
             try Task
@@ -129,7 +165,7 @@ final class DatabaseManager {
             try Task
                 .filter(Task.Columns.queue == TaskQueue.thought.rawValue)
                 .filter(Task.Columns.meetingId == nil)
-                .order(Task.Columns.createdAt.desc)
+                .order(Task.Columns.position.asc, Task.Columns.createdAt.asc)
                 .fetchAll(db)
         }
     }
@@ -292,6 +328,7 @@ final class DatabaseManager {
         try dbQueue.write { db in
             try db.execute(sql: "DELETE FROM tasks")
             try db.execute(sql: "DELETE FROM meetings")
+            try db.execute(sql: "DELETE FROM daily_focus_items")
         }
         notifyChange()
     }
@@ -299,8 +336,8 @@ final class DatabaseManager {
     // MARK: - Meeting CRUD
 
     @discardableResult
-    func createMeeting(title: String, attendees: String? = nil, now: Date = .now) throws -> Meeting {
-        var meeting = Meeting(title: title, attendees: attendees, startedAt: now)
+    func createMeeting(title: String, attendees: String? = nil, summary: String? = nil, now: Date = .now) throws -> Meeting {
+        var meeting = Meeting(title: title, attendees: attendees, summary: summary, startedAt: now)
         try dbQueue.write { db in try meeting.insert(db) }
         notifyChange()
         return meeting
@@ -321,9 +358,12 @@ final class DatabaseManager {
         }
     }
 
-    func endMeeting(id: String, now: Date = .now) throws {
+    func endMeeting(id: String, summary: String? = nil, now: Date = .now) throws {
         try dbQueue.write { db in
             guard var meeting = try Meeting.fetchOne(db, key: id) else { return }
+            if let summary {
+                meeting.summary = summary
+            }
             meeting.endedAt = DateCodec.string(from: now)
             try meeting.update(db)
         }
@@ -343,7 +383,128 @@ final class DatabaseManager {
         notifyChange()
     }
 
+    // MARK: - Daily Focus
+
+    @discardableResult
+    func createDailyFocusItem(
+        title: String,
+        sourceTaskId: String? = nil,
+        dayKey: String = DatabaseManager.dayKey(for: .now),
+        now: Date = .now
+    ) throws -> DailyFocusItem {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw NSError(domain: "Jot.Database", code: 1, userInfo: [NSLocalizedDescriptionKey: "Daily focus title cannot be empty"])
+        }
+
+        var item = DailyFocusItem(
+            dayKey: dayKey,
+            title: trimmed,
+            isDone: false,
+            sourceTaskId: sourceTaskId,
+            createdAt: now,
+            position: try nextDailyFocusPosition(dayKey: dayKey)
+        )
+
+        try dbQueue.write { db in
+            try item.insert(db)
+        }
+        notifyChange()
+        return item
+    }
+
+    @discardableResult
+    func createDailyFocusItem(from task: Task, dayKey: String = DatabaseManager.dayKey(for: .now), now: Date = .now) throws -> DailyFocusItem {
+        if let existing = try fetchDailyFocusItem(sourceTaskId: task.id, dayKey: dayKey) {
+            return existing
+        }
+        return try createDailyFocusItem(title: task.title, sourceTaskId: task.id, dayKey: dayKey, now: now)
+    }
+
+    func fetchDailyFocusItems(dayKey: String = DatabaseManager.dayKey(for: .now)) throws -> [DailyFocusItem] {
+        try dbQueue.read { db in
+            try DailyFocusItem
+                .filter(DailyFocusItem.Columns.dayKey == dayKey)
+                .order(DailyFocusItem.Columns.isDone.asc, DailyFocusItem.Columns.position.asc, DailyFocusItem.Columns.createdAt.asc)
+                .fetchAll(db)
+        }
+    }
+
+    func updateDailyFocusItem(_ item: DailyFocusItem) throws {
+        try dbQueue.write { db in
+            try item.update(db)
+        }
+        notifyChange()
+    }
+
+    func toggleDailyFocusDone(id: String) throws {
+        try dbQueue.write { db in
+            guard var item = try DailyFocusItem.fetchOne(db, key: id) else { return }
+            item.isDone.toggle()
+            try item.update(db)
+        }
+        notifyChange()
+    }
+
+    func deleteDailyFocusItem(id: String) throws {
+        _ = try dbQueue.write { db in
+            try DailyFocusItem.deleteOne(db, key: id)
+        }
+        notifyChange()
+    }
+
+    func reorderDailyFocus(dayKey: String = DatabaseManager.dayKey(for: .now), orderedIDs: [String]) throws {
+        try dbQueue.write { db in
+            for (index, id) in orderedIDs.enumerated() {
+                try db.execute(
+                    sql: "UPDATE daily_focus_items SET position = ? WHERE id = ? AND day_key = ?",
+                    arguments: [index, id, dayKey]
+                )
+            }
+        }
+        notifyChange()
+    }
+
+    // MARK: - Task Daily Focus
+
+    func setTaskDailyFocus(id: String, dayKey: String = DatabaseManager.dayKey(for: .now)) throws {
+        try dbQueue.write { db in
+            guard var task = try Task.fetchOne(db, key: id) else { return }
+            task.dailyFocusDate = dayKey
+            try task.update(db)
+        }
+        notifyChange()
+    }
+
+    func removeTaskDailyFocus(id: String) throws {
+        try dbQueue.write { db in
+            guard var task = try Task.fetchOne(db, key: id) else { return }
+            task.dailyFocusDate = nil
+            try task.update(db)
+        }
+        notifyChange()
+    }
+
+    func fetchDailyFocusTasks(dayKey: String = DatabaseManager.dayKey(for: .now)) throws -> [Task] {
+        try dbQueue.read { db in
+            try Task
+                .filter(Task.Columns.dailyFocusDate == dayKey)
+                .order(Task.Columns.status.asc, Task.Columns.position.asc, Task.Columns.createdAt.asc)
+                .fetchAll(db)
+        }
+    }
+
     // MARK: - Private
+
+    static func dayKey(for date: Date, calendar: Calendar = .current) -> String {
+        let day = calendar.startOfDay(for: date)
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: day)
+    }
 
     private func nextPosition(in queue: TaskQueue) throws -> Int64 {
         try dbQueue.read { db in
@@ -353,6 +514,26 @@ final class DatabaseManager {
                 arguments: [queue.rawValue]
             )
             return (max ?? -1) + 1
+        }
+    }
+
+    private func nextDailyFocusPosition(dayKey: String) throws -> Int64 {
+        try dbQueue.read { db in
+            let max: Int64? = try Int64.fetchOne(
+                db,
+                sql: "SELECT MAX(position) FROM daily_focus_items WHERE day_key = ?",
+                arguments: [dayKey]
+            )
+            return (max ?? -1) + 1
+        }
+    }
+
+    private func fetchDailyFocusItem(sourceTaskId: String, dayKey: String) throws -> DailyFocusItem? {
+        try dbQueue.read { db in
+            try DailyFocusItem
+                .filter(DailyFocusItem.Columns.sourceTaskId == sourceTaskId)
+                .filter(DailyFocusItem.Columns.dayKey == dayKey)
+                .fetchOne(db)
         }
     }
 

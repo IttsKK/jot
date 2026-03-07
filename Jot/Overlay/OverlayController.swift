@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -8,6 +9,8 @@ final class OverlayController: NSObject {
     private var panel: CapturePanel?
     private var viewModel: CaptureViewModel
     private var appResignObserver: NSObjectProtocol?
+    private var keyMonitor: Any?
+    private var cancellables: Set<AnyCancellable> = []
 
     init(database: DatabaseManager, settings: SettingsStore, meetingSession: MeetingSession) {
         self.database = database
@@ -23,11 +26,22 @@ final class OverlayController: NSObject {
                 self?.hide()
             }
         }
+
+        viewModel.$panelHeight
+            .removeDuplicates()
+            .sink { [weak self] height in
+                guard let self else { return }
+                self.updatePanelFrame(height: height, animated: true)
+            }
+            .store(in: &cancellables)
     }
 
     deinit {
         if let appResignObserver {
             NotificationCenter.default.removeObserver(appResignObserver)
+        }
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
         }
     }
 
@@ -45,18 +59,26 @@ final class OverlayController: NSObject {
 
     func show() {
         if panel == nil {
-            let frame = panelFrame()
+            let frame = panelFrame(height: viewModel.panelHeight)
             let panel = CapturePanel(frame: frame)
-            panel.contentView = NSHostingView(rootView: CaptureView(viewModel: viewModel, onDismiss: { [weak self] in
+            panel.onEscape = { [weak self] in
+                self?.hide()
+            }
+            let host = NSHostingView(rootView: CaptureView(viewModel: viewModel, settings: settings, onDismiss: { [weak self] in
                 self?.hide()
             }))
+            host.wantsLayer = true
+            host.layerContentsRedrawPolicy = .duringViewResize
+            panel.contentView = host
+            panel.refreshCornerMask()
             panel.delegate = self
             self.panel = panel
         }
 
         if let panel {
+            installKeyMonitorIfNeeded()
             viewModel.requestFocus()
-            panel.setFrame(panelFrame(), display: true)
+            panel.setFrame(panelFrame(height: viewModel.panelHeight), display: true)
             panel.orderFrontRegardless()
             panel.makeKey()
         }
@@ -64,25 +86,41 @@ final class OverlayController: NSObject {
 
     func hide() {
         panel?.orderOut(nil)
+        removeKeyMonitor()
         viewModel.clear()
     }
 
-    private func panelFrame() -> NSRect {
+    private func panelFrame(height: CGFloat) -> NSRect {
         let screen = activeScreen()
         let visible = screen.visibleFrame
         let width = min(680, visible.width - 80)
-        let height: CGFloat = 104
         let x = visible.midX - (width / 2)
 
         let y: CGFloat
         switch settings.overlayPosition {
         case .upperThird:
-            y = visible.origin.y + (visible.height * 0.62)
+            let minHeight: CGFloat = viewModel.meetingSession.isInMeeting ? 84 : 64
+            let fixedTop = visible.origin.y + (visible.height * 0.62) + minHeight
+            y = fixedTop - height
         case .center:
             y = visible.midY - (height / 2)
         }
 
         return NSRect(x: x, y: y, width: width, height: height)
+    }
+
+    private func updatePanelFrame(height: CGFloat, animated: Bool) {
+        guard let panel, panel.isVisible else { return }
+        let targetFrame = panelFrame(height: height)
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                panel.animator().setFrame(targetFrame, display: true)
+            }
+        } else {
+            panel.setFrame(targetFrame, display: true)
+        }
     }
 
     private func activeScreen() -> NSScreen {
@@ -91,6 +129,25 @@ final class OverlayController: NSObject {
             return match
         }
         return NSScreen.main ?? NSScreen.screens.first!
+    }
+
+    private func installKeyMonitorIfNeeded() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.panel?.isVisible == true else { return event }
+            if event.keyCode == 53 {
+                self.hide()
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
     }
 }
 

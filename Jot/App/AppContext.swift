@@ -8,6 +8,7 @@ final class AppContext: ObservableObject {
     private enum HotKeyID {
         static let quickCapture: UInt32 = 1
         static let openApp: UInt32 = 2
+        static let dailyFocus: UInt32 = 3
     }
 
     let database: DatabaseManager
@@ -17,6 +18,7 @@ final class AppContext: ObservableObject {
     let statusBar: StatusBarController
     let notificationManager: NotificationManager
     private var mainWindowController: MainWindowController?
+    private var dailyFocusWindowController: DailyFocusWindowController?
     private var settingsObserver: NSObjectProtocol?
     private var interfaceThemeObserver: NSObjectProtocol?
     private lazy var updaterController = Self.makeUpdaterControllerIfAvailable()
@@ -31,6 +33,9 @@ final class AppContext: ObservableObject {
 
         statusBar.onOpenApp = { [weak self] in
             self?.openMainWindow()
+        }
+        statusBar.onOpenDailyFocus = { [weak self] in
+            self?.openDailyFocusWindow()
         }
         statusBar.onOpenSettings = {
             NSApplication.shared.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
@@ -90,6 +95,16 @@ final class AppContext: ObservableObject {
                 self?.openMainWindow()
             }
         }
+
+        let dailyFocusShortcut = HotKeyShortcut(
+            keyCode: settings.dailyFocusHotKeyCode,
+            modifiers: settings.dailyFocusHotKeyModifiers
+        )
+        HotKeyManager.shared.register(id: HotKeyID.dailyFocus, shortcut: dailyFocusShortcut) { [weak self] in
+            DispatchQueue.main.async {
+                self?.openDailyFocusWindow()
+            }
+        }
     }
 
     func openMainWindow() {
@@ -102,6 +117,13 @@ final class AppContext: ObservableObject {
             }
         }
         mainWindowController?.present()
+    }
+
+    func openDailyFocusWindow() {
+        if dailyFocusWindowController == nil {
+            dailyFocusWindowController = DailyFocusWindowController(database: database)
+        }
+        dailyFocusWindowController?.toggle()
     }
 
     func checkForUpdates() {
