@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 INFO_PLIST="$ROOT_DIR/Jot/App/Info.plist"
 DOCS_APPCAST="$ROOT_DIR/docs/appcast.xml"
+CURRENT_BRANCH="$(git -C "$ROOT_DIR" branch --show-current)"
 
 usage() {
   cat <<EOF
@@ -11,7 +12,8 @@ Usage: scripts/publish.sh <version> [--draft] [--notes-file <path>]
 
 Bumps version in Info.plist, builds release artifacts, and creates a GitHub
 release with all assets attached. Also refreshes docs/appcast.xml for GitHub
-Pages.
+Pages, commits the release metadata, pushes the branch, and then creates the
+GitHub release from the pushed commit.
 
 Arguments:
   <version>   Semantic version to release (e.g. 1.0.1)
@@ -63,6 +65,21 @@ if [[ ! -f "$RELEASE_NOTES_FILE" ]]; then
   exit 1
 fi
 
+if [[ -z "$CURRENT_BRANCH" ]]; then
+  echo "error: publish.sh must run from a named git branch"
+  exit 1
+fi
+
+if [[ "$CURRENT_BRANCH" != "main" ]]; then
+  echo "error: releases must be cut from main (current branch: $CURRENT_BRANCH)"
+  exit 1
+fi
+
+if ! git -C "$ROOT_DIR" diff --quiet || ! git -C "$ROOT_DIR" diff --cached --quiet; then
+  echo "error: working tree has tracked changes; commit them before running publish.sh"
+  exit 1
+fi
+
 # ---------------------------------------------------------------------------
 # 1. Bump CFBundleShortVersionString
 # ---------------------------------------------------------------------------
@@ -90,7 +107,24 @@ echo "==> Updating docs/appcast.xml"
 cp "$ROOT_DIR/release-feed/appcast.xml" "$DOCS_APPCAST"
 
 # ---------------------------------------------------------------------------
-# 5. Create GitHub release and upload assets
+# 5. Commit and push release metadata
+# ---------------------------------------------------------------------------
+git -C "$ROOT_DIR" add "$INFO_PLIST" "$DOCS_APPCAST" "$RELEASE_NOTES_FILE"
+if git -C "$ROOT_DIR" diff --cached --quiet; then
+  echo "error: no release metadata changes were staged"
+  exit 1
+fi
+
+echo "==> Committing release metadata"
+git -C "$ROOT_DIR" commit -m "Release v$VERSION"
+
+echo "==> Pushing $CURRENT_BRANCH"
+git -C "$ROOT_DIR" push origin "$CURRENT_BRANCH"
+
+TARGET_SHA="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+
+# ---------------------------------------------------------------------------
+# 6. Create GitHub release and upload assets
 # ---------------------------------------------------------------------------
 TAG="v$VERSION"
 ASSETS=(
@@ -111,12 +145,9 @@ RELEASE_URL=$(gh release create "$TAG" \
   "${ASSETS[@]}" \
   --title "Jot $VERSION" \
   --notes-file "$RELEASE_NOTES_FILE" \
+  --target "$TARGET_SHA" \
   ${GH_EXTRA_ARGS[@]+"${GH_EXTRA_ARGS[@]}"} \
   2>&1 | tail -n 1)
 
 echo
 echo "Release created: $RELEASE_URL"
-echo
-echo "Next steps:"
-echo "  1) Commit and push the updated docs/appcast.xml and version changes on main"
-echo "  2) Verify https://ittskk.github.io/jot/appcast.xml after Pages rebuilds"

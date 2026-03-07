@@ -21,7 +21,8 @@ final class HotKeyManager {
         unregisterAll()
     }
 
-    func register(id: UInt32, shortcut: HotKeyShortcut, callback: @escaping () -> Void) {
+    @discardableResult
+    func register(id: UInt32, shortcut: HotKeyShortcut, callback: @escaping () -> Void) -> Bool {
         unregister(id: id)
         callbacks[id] = callback
         installEventHandlerIfNeeded()
@@ -31,8 +32,10 @@ final class HotKeyManager {
         let status = RegisterEventHotKey(shortcut.keyCode, shortcut.modifiers, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)
         if status == noErr, let hotKeyRef {
             hotKeyRefs[id] = hotKeyRef
+            return true
         } else {
             callbacks.removeValue(forKey: id)
+            return false
         }
     }
 

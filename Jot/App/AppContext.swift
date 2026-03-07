@@ -21,6 +21,7 @@ final class AppContext: ObservableObject {
     private var dailyFocusWindowController: DailyFocusWindowController?
     private var settingsObserver: NSObjectProtocol?
     private var interfaceThemeObserver: NSObjectProtocol?
+    private var windowCloseObserver: NSObjectProtocol?
     private lazy var updaterController = Self.makeUpdaterControllerIfAvailable()
 
     private init() {
@@ -37,9 +38,8 @@ final class AppContext: ObservableObject {
         statusBar.onOpenDailyFocus = { [weak self] in
             self?.openDailyFocusWindow()
         }
-        statusBar.onOpenSettings = {
-            NSApplication.shared.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-            NSApplication.shared.activate(ignoringOtherApps: true)
+        statusBar.onOpenSettings = { [weak self] in
+            self?.openSettingsWindow()
         }
         statusBar.onCheckForUpdates = { [weak self] in
             self?.checkForUpdates()
@@ -73,37 +73,70 @@ final class AppContext: ObservableObject {
                 self?.updateApplicationIcon()
             }
         }
+
+        windowCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.restoreAccessoryActivationIfNeeded()
+            }
+        }
     }
 
     func registerHotKeys() {
-        let quickCaptureShortcut = HotKeyShortcut(
-            keyCode: settings.quickCaptureHotKeyCode,
-            modifiers: settings.quickCaptureHotKeyModifiers
-        )
-        HotKeyManager.shared.register(id: HotKeyID.quickCapture, shortcut: quickCaptureShortcut) { [weak self] in
+        var failures: [String] = []
+
+        let quickCaptureRegistered = HotKeyManager.shared.register(
+            id: HotKeyID.quickCapture,
+            shortcut: HotKeyShortcut(
+                keyCode: settings.quickCaptureHotKeyCode,
+                modifiers: settings.quickCaptureHotKeyModifiers
+            )
+        ) { [weak self] in
             DispatchQueue.main.async {
                 self?.overlay.toggle()
             }
         }
+        if !quickCaptureRegistered {
+            failures.append("Quick Capture")
+        }
 
-        let openAppShortcut = HotKeyShortcut(
-            keyCode: settings.openAppHotKeyCode,
-            modifiers: settings.openAppHotKeyModifiers
-        )
-        HotKeyManager.shared.register(id: HotKeyID.openApp, shortcut: openAppShortcut) { [weak self] in
+        let openAppRegistered = HotKeyManager.shared.register(
+            id: HotKeyID.openApp,
+            shortcut: HotKeyShortcut(
+                keyCode: settings.openAppHotKeyCode,
+                modifiers: settings.openAppHotKeyModifiers
+            )
+        ) { [weak self] in
             DispatchQueue.main.async {
                 self?.openMainWindow()
             }
         }
+        if !openAppRegistered {
+            failures.append("Open App")
+        }
 
-        let dailyFocusShortcut = HotKeyShortcut(
-            keyCode: settings.dailyFocusHotKeyCode,
-            modifiers: settings.dailyFocusHotKeyModifiers
-        )
-        HotKeyManager.shared.register(id: HotKeyID.dailyFocus, shortcut: dailyFocusShortcut) { [weak self] in
+        let dailyFocusRegistered = HotKeyManager.shared.register(
+            id: HotKeyID.dailyFocus,
+            shortcut: HotKeyShortcut(
+                keyCode: settings.dailyFocusHotKeyCode,
+                modifiers: settings.dailyFocusHotKeyModifiers
+            )
+        ) { [weak self] in
             DispatchQueue.main.async {
                 self?.openDailyFocusWindow()
             }
+        }
+        if !dailyFocusRegistered {
+            failures.append("Today List")
+        }
+
+        if failures.isEmpty {
+            settings.hotKeyRegistrationError = nil
+        } else {
+            settings.hotKeyRegistrationError = "Jot couldn't register \(failures.joined(separator: ", ")). The shortcut may already be in use by macOS or another app."
         }
     }
 
@@ -126,6 +159,13 @@ final class AppContext: ObservableObject {
         dailyFocusWindowController?.toggle()
     }
 
+    func openSettingsWindow() {
+        overlay.hide()
+        NSApplication.shared.setActivationPolicy(.regular)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        NSApplication.shared.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    }
+
     func checkForUpdates() {
         updaterController?.checkForUpdates(nil)
     }
@@ -135,7 +175,16 @@ final class AppContext: ObservableObject {
     }
 
     private func handleMainWindowClosed() {
-        NSApplication.shared.setActivationPolicy(.accessory)
+        restoreAccessoryActivationIfNeeded()
+    }
+
+    private func restoreAccessoryActivationIfNeeded() {
+        let hasVisibleStandardWindow = NSApplication.shared.windows.contains { window in
+            window.isVisible && !(window is NSPanel)
+        }
+        if !hasVisibleStandardWindow {
+            NSApplication.shared.setActivationPolicy(.accessory)
+        }
     }
 
     private func updateApplicationIcon() {

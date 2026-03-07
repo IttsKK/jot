@@ -111,6 +111,8 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    @Published var hotKeyRegistrationError: String?
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -152,6 +154,7 @@ final class SettingsStore: ObservableObject {
 
         let rawAppearance = defaults.string(forKey: UserDefaultKeys.appearance)
         appearance = AppAppearance(rawValue: rawAppearance ?? AppAppearance.system.rawValue) ?? .system
+        hotKeyRegistrationError = nil
         NSApp.appearance = appearance.nsAppearance
         LaunchAtLoginManager.setEnabled(launchAtLogin)
     }

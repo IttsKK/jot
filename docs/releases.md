@@ -32,17 +32,7 @@ This repo uses a local-first release flow:
 ./scripts/publish.sh 1.0.1 --draft
 ```
 
-This bumps `Info.plist` version fields, runs `release.sh` (build + sign + DMG + appcast), copies the generated feed to `docs/appcast.xml`, and creates a GitHub release with all artifacts attached.
-
-3. Commit and push the release changes
-
-```bash
-git add Jot/App/Info.plist docs/appcast.xml release-notes/1.0.1.md
-git commit -m "Release v1.0.1"
-git push origin main
-```
-
-Once `main` is pushed, GitHub Pages will publish the updated `docs/appcast.xml`.
+This requires a clean tracked worktree on `main`, bumps `Info.plist` version fields, runs `release.sh` (build + sign + DMG + appcast), copies the generated feed to `docs/appcast.xml`, commits the release metadata, pushes `main`, and creates a GitHub release targeting the pushed commit.
 
 ## Local build prerequisites
 

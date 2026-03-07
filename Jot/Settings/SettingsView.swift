@@ -30,6 +30,10 @@ struct SettingsView: View {
 
             settingsPage {
                 settingsSection("Hotkeys", description: "Global shortcuts for capture and window management.") {
+                    if let hotKeyRegistrationError = settings.hotKeyRegistrationError {
+                        hotkeyErrorMessage(hotKeyRegistrationError)
+                    }
+
                     hotkeyEditor(
                         title: "Quick Capture",
                         keyCode: $settings.quickCaptureHotKeyCode,
@@ -224,6 +228,28 @@ struct SettingsView: View {
             modifiers: modifiers,
             description: description
         )
+    }
+
+    private func hotkeyErrorMessage(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .font(.system(size: 14, weight: .bold))
+
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.orange.opacity(0.08))
+        )
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
     }
 }
 
