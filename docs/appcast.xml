@@ -1,0 +1,15 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Jot</title>
+        <item>
+            <title>1.1.0</title>
+            <pubDate>Sat, 07 Mar 2026 01:21:35 -0700</pubDate>
+            <sparkle:version>4</sparkle:version>
+            <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/IttsKK/jot/releases/download/v1.1.0/Jot-1.1.0.zip" length="4790633" type="application/octet-stream" sparkle:edSignature="9TtWZfuA4BqWcFL/Blr27uBAvD1QUG12LI0xXnMayYnpWXG/ouMiuhwh3vqJN/HYuNisXdgNI+UCrQFdi87nAg=="/>
+        </item>
+    </channel>
+</rss>

@@ -25,12 +25,14 @@ swift test
 ## Release
 
 ```bash
-# One command: bumps version, builds, signs, creates GitHub release
+# One command: bumps version, builds, signs, refreshes docs/appcast.xml, creates GitHub release
 ./scripts/publish.sh 1.0.1
 
 # Or as a draft
 ./scripts/publish.sh 1.0.1 --draft
 ```
+
+Then commit and push the generated release changes so GitHub Pages serves the updated `docs/appcast.xml`.
 
 See [docs/releases.md](docs/releases.md) for full setup details (signing keys, GitHub Pages, etc.).
 

@@ -3,13 +3,15 @@
 This repo uses a local-first release flow:
 
 - **Local:** `release.sh` builds the app, DMG, ZIP, and signed appcast
-- **GitHub Actions:** publishes `appcast.xml` to GitHub Pages when a release is created
+- **GitHub Pages:** serves the site and `docs/appcast.xml` directly from `main`
 
 ## One-time GitHub setup
 
 1. Enable GitHub Pages:
    - Repository Settings -> Pages
-   - Source: `GitHub Actions`
+   - Source: `Deploy from a branch`
+   - Branch: `main`
+   - Folder: `/docs`
 
 2. Confirm feed URL in app:
    - `Jot/App/Info.plist` should contain:
@@ -30,7 +32,17 @@ This repo uses a local-first release flow:
 ./scripts/publish.sh 1.0.1 --draft
 ```
 
-This bumps `Info.plist` version fields, runs `release.sh` (build + sign + DMG + appcast), and creates a GitHub release with all artifacts attached. GitHub Actions will automatically deploy `appcast.xml` to Pages when the release is published.
+This bumps `Info.plist` version fields, runs `release.sh` (build + sign + DMG + appcast), copies the generated feed to `docs/appcast.xml`, and creates a GitHub release with all artifacts attached.
+
+3. Commit and push the release changes
+
+```bash
+git add Jot/App/Info.plist docs/appcast.xml release-notes/1.0.1.md
+git commit -m "Release v1.0.1"
+git push origin main
+```
+
+Once `main` is pushed, GitHub Pages will publish the updated `docs/appcast.xml`.
 
 ## Local build prerequisites
 
