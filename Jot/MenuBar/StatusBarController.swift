@@ -38,6 +38,13 @@ final class StatusBarController: NSObject {
                 }
             }
         )
+        observers.append(
+            NotificationCenter.default.addObserver(forName: .jotSettingsDidChange, object: nil, queue: .main) { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.rebuildMenu()
+                }
+            }
+        )
 
         rebuildMenu()
     }
@@ -152,7 +159,7 @@ final class StatusBarController: NSObject {
         menu.addItem(.separator())
         menu.addItem(makeQuickAddMenuItem())
         menu.addItem(makeOpenAppMenuItem())
-        menu.addItem(NSMenuItem(title: "Open Today Focus List", action: #selector(openDailyFocus), keyEquivalent: "d"))
+        menu.addItem(makeDailyFocusMenuItem())
         menu.addItem(NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: ","))
         let checkForUpdatesItem = NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: "")
         checkForUpdatesItem.isEnabled = canCheckForUpdates
@@ -183,12 +190,35 @@ final class StatusBarController: NSObject {
     }
 
     private func makeOpenAppMenuItem() -> NSMenuItem {
-        let item = NSMenuItem(
+        makeConfiguredMenuItem(
             title: "Open App",
             action: #selector(openApp),
-            keyEquivalent: ShortcutFormatter.keyEquivalent(for: settings.openAppHotKeyCode)
+            keyCode: settings.openAppHotKeyCode,
+            modifiers: settings.openAppHotKeyModifiers
         )
-        item.keyEquivalentModifierMask = ShortcutFormatter.modifierMask(for: settings.openAppHotKeyModifiers)
+    }
+
+    private func makeDailyFocusMenuItem() -> NSMenuItem {
+        makeConfiguredMenuItem(
+            title: "Open Today Focus List",
+            action: #selector(openDailyFocus),
+            keyCode: settings.dailyFocusHotKeyCode,
+            modifiers: settings.dailyFocusHotKeyModifiers
+        )
+    }
+
+    private func makeConfiguredMenuItem(
+        title: String,
+        action: Selector,
+        keyCode: UInt32,
+        modifiers: UInt32
+    ) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: title,
+            action: action,
+            keyEquivalent: ShortcutFormatter.keyEquivalent(for: keyCode)
+        )
+        item.keyEquivalentModifierMask = ShortcutFormatter.modifierMask(for: modifiers)
         return item
     }
 }

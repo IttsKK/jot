@@ -218,8 +218,26 @@ struct SettingsView: View {
         modifiers: Binding<UInt32>,
         description: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 16) {
+        HotkeyRecorderRow(
+            title: title,
+            keyCode: keyCode,
+            modifiers: modifiers,
+            description: description
+        )
+    }
+}
+
+private struct HotkeyRecorderRow: View {
+    let title: String
+    @Binding var keyCode: UInt32
+    @Binding var modifiers: UInt32
+    let description: String
+
+    @State private var isRecording = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
                         .font(.headline)
@@ -228,44 +246,194 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 20)
-                Picker("Key", selection: keyCode) {
-                    ForEach(ShortcutFormatter.keyOptions) { option in
-                        Text(option.label).tag(option.keyCode)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 120)
+                ShortcutRecorderField(
+                    keyCode: $keyCode,
+                    modifiers: $modifiers,
+                    isRecording: $isRecording
+                )
+                .frame(width: 220, height: 34)
             }
 
-            HStack(spacing: 14) {
-                modifierToggle("Control", modifiers: modifiers, flag: UInt32(controlKey))
-                modifierToggle("Option", modifiers: modifiers, flag: UInt32(optionKey))
-                modifierToggle("Shift", modifiers: modifiers, flag: UInt32(shiftKey))
-                modifierToggle("Command", modifiers: modifiers, flag: UInt32(cmdKey))
-                Spacer()
-            }
-
-            Text(ShortcutFormatter.displayString(keyCode: keyCode.wrappedValue, modifiers: modifiers.wrappedValue))
-                .font(.system(.footnote, design: .monospaced, weight: .semibold))
-                .foregroundStyle(.secondary)
+            Text(isRecording ? "Press the shortcut now. Esc cancels." : "Click the field, then press a shortcut with at least one modifier.")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
     }
+}
 
-    private func modifierToggle(_ label: String, modifiers: Binding<UInt32>, flag: UInt32) -> some View {
-        Toggle(label, isOn: Binding(
-            get: { modifiers.wrappedValue & flag != 0 },
-            set: { enabled in
-                var value = modifiers.wrappedValue
-                if enabled {
-                    value |= flag
-                } else {
-                    value &= ~flag
-                }
-                modifiers.wrappedValue = value
-            }
-        ))
-        .toggleStyle(.checkbox)
+private struct ShortcutRecorderField: NSViewRepresentable {
+    @Binding var keyCode: UInt32
+    @Binding var modifiers: UInt32
+    @Binding var isRecording: Bool
+
+    func makeNSView(context: Context) -> ShortcutRecorderNSView {
+        let view = ShortcutRecorderNSView()
+        view.onShortcutCaptured = { newKeyCode, newModifiers in
+            keyCode = newKeyCode
+            modifiers = newModifiers
+        }
+        view.onRecordingChanged = { recording in
+            isRecording = recording
+        }
+        view.keyCode = keyCode
+        view.modifiers = modifiers
+        return view
+    }
+
+    func updateNSView(_ nsView: ShortcutRecorderNSView, context: Context) {
+        nsView.onShortcutCaptured = { newKeyCode, newModifiers in
+            keyCode = newKeyCode
+            modifiers = newModifiers
+        }
+        nsView.onRecordingChanged = { recording in
+            isRecording = recording
+        }
+        nsView.keyCode = keyCode
+        nsView.modifiers = modifiers
+    }
+}
+
+private final class ShortcutRecorderNSView: NSView {
+    var keyCode: UInt32 = 0 {
+        didSet { updateDisplay() }
+    }
+
+    var modifiers: UInt32 = 0 {
+        didSet { updateDisplay() }
+    }
+
+    var onShortcutCaptured: ((UInt32, UInt32) -> Void)?
+    var onRecordingChanged: ((Bool) -> Void)?
+
+    private let label = NSTextField(labelWithString: "")
+    private var pendingModifiers: UInt32 = 0
+    private var isRecording = false {
+        didSet {
+            guard oldValue != isRecording else { return }
+            onRecordingChanged?(isRecording)
+            updateDisplay()
+            updateAppearance()
+        }
+    }
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if became {
+            pendingModifiers = 0
+            isRecording = true
+        }
+        return became
+    }
+
+    override func resignFirstResponder() -> Bool {
+        pendingModifiers = 0
+        isRecording = false
+        return super.resignFirstResponder()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard isRecording else {
+            super.keyDown(with: event)
+            return
+        }
+
+        if event.keyCode == 53 {
+            window?.makeFirstResponder(nil)
+            return
+        }
+
+        let newKeyCode = UInt32(event.keyCode)
+        let newModifiers = ShortcutFormatter.carbonModifiers(from: event.modifierFlags)
+
+        guard !ShortcutFormatter.isModifierOnlyKey(newKeyCode) else {
+            return
+        }
+
+        guard newModifiers != 0 else {
+            NSSound.beep()
+            return
+        }
+
+        onShortcutCaptured?(newKeyCode, newModifiers)
+        window?.makeFirstResponder(nil)
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        guard isRecording else {
+            super.flagsChanged(with: event)
+            return
+        }
+        pendingModifiers = ShortcutFormatter.carbonModifiers(from: event.modifierFlags)
+        updateDisplay()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
+    }
+
+    private func setup() {
+        wantsLayer = true
+
+        label.font = .systemFont(ofSize: 13, weight: .semibold)
+        label.alignment = .center
+        label.lineBreakMode = .byTruncatingTail
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+
+        updateDisplay()
+        updateAppearance()
+    }
+
+    private func updateDisplay() {
+        if isRecording {
+            let modifiersText = ShortcutFormatter.modifierDisplayString(modifiers: pendingModifiers)
+            label.stringValue = modifiersText.isEmpty ? "Type shortcut" : modifiersText
+        } else {
+            label.stringValue = ShortcutFormatter.displayString(keyCode: keyCode, modifiers: modifiers)
+        }
+    }
+
+    private func updateAppearance() {
+        guard let layer else { return }
+
+        layer.cornerRadius = 8
+        layer.borderWidth = 1
+
+        if isRecording {
+            layer.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
+            layer.borderColor = NSColor.controlAccentColor.cgColor
+            label.textColor = .labelColor
+        } else {
+            layer.backgroundColor = NSColor.controlBackgroundColor.cgColor
+            layer.borderColor = NSColor.separatorColor.cgColor
+            label.textColor = .secondaryLabelColor
+        }
     }
 }
