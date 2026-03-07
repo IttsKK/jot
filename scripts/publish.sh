@@ -16,14 +16,14 @@ Pages, commits the release metadata, pushes the branch, and then creates the
 GitHub release from the pushed commit.
 
 Arguments:
-  <version>   Semantic version to release (e.g. 1.0.1)
+  <version>   Semantic version to release (e.g. 1.1.2)
   --draft     Create the GitHub release as a draft
   --notes-file  Path to the release notes markdown file to publish
 
 Examples:
-  ./scripts/publish.sh 1.0.1
-  ./scripts/publish.sh 1.0.1 --draft
-  ./scripts/publish.sh 1.0.1 --notes-file release-notes/1.0.1.md
+  ./scripts/publish.sh 1.1.2
+  ./scripts/publish.sh 1.1.2 --draft
+  ./scripts/publish.sh 1.1.2 --notes-file release-notes/1.1.2.md
 EOF
 }
 

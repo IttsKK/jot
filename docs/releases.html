@@ -4,11 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jot - Releases</title>
-    <meta name="description" content="Release notes and downloads for Jot, the minimal task tracker for macOS.">
+    <meta name="description" content="Release notes and downloads for Jot, the macOS menu bar app for tasks, follow-ups, notes, and meetings.">
     <link rel="stylesheet" href="style.css">
     <link rel="icon" type="image/png" href="assets/app-icon.png">
-    <!-- Marked.js for parsing markdown in release notes -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
     <nav class="navbar">
@@ -33,11 +31,115 @@
     <main class="releases-page">
         <section class="releases-header reveal">
             <h1>Release Notes</h1>
-            <p>What's new in Jot.</p>
+            <p>Checked-in release history for the current public versions.</p>
         </section>
 
-        <section class="releases-list" id="releases-container">
-            <div class="loading-spinner">Loading releases...</div>
+        <section class="releases-list">
+            <article class="release-card reveal">
+                <div class="release-meta">
+                    <span class="release-version">1.1.2</span>
+                    <span class="release-date">March 7, 2026</span>
+                    <span class="release-pill">Latest</span>
+                </div>
+                <div class="release-content">
+                    <div class="release-body">
+                        <h2>Highlights</h2>
+                        <ul>
+                            <li>Fixed the menu bar Settings action so it reliably opens the Settings window from the accessory app state.</li>
+                            <li>Added clear in-app warnings when a global hotkey cannot be registered because the shortcut is already in use.</li>
+                            <li>Improved the shortcut settings flow so registration failures are surfaced instead of silently leaving a broken shortcut behind.</li>
+                        </ul>
+                        <h2>Improvements</h2>
+                        <ul>
+                            <li>Tightened release publishing so releases are cut from a clean <code>main</code> branch, commit their metadata first, and publish from the pushed commit SHA.</li>
+                            <li>Declared macOS 14 as the app minimum in the app bundle metadata to match the actual app requirements.</li>
+                        </ul>
+                    </div>
+                    <div class="release-actions">
+                        <a href="https://github.com/IttsKK/jot/releases/tag/v1.1.2" class="btn btn-primary btn-small">Download 1.1.2</a>
+                        <a href="https://github.com/IttsKK/jot/blob/main/release-notes/1.1.2.md" class="release-link" target="_blank" rel="noopener noreferrer">View source note</a>
+                    </div>
+                </div>
+            </article>
+
+            <article class="release-card reveal delay-1">
+                <div class="release-meta">
+                    <span class="release-version">1.1.1</span>
+                    <span class="release-date">March 7, 2026</span>
+                </div>
+                <div class="release-content">
+                    <div class="release-body">
+                        <h2>Highlights</h2>
+                        <ul>
+                            <li>Reworked hotkey editing so shortcuts are recorded directly from the keyboard instead of being assembled from separate key and modifier controls.</li>
+                            <li>Fixed the menu bar shortcut labels so the Today Focus entry reflects the configured hotkey instead of a hardcoded key.</li>
+                            <li>Improved shortcut display formatting across the app with cleaner symbol-based labels for keys and modifiers.</li>
+                        </ul>
+                        <h2>Improvements</h2>
+                        <ul>
+                            <li>Switched Sparkle appcast publishing to <code>docs/appcast.xml</code>, matching the GitHub Pages hosting setup.</li>
+                            <li>Added explicit versioned release notes support so GitHub releases publish the intended notes body.</li>
+                        </ul>
+                    </div>
+                    <div class="release-actions">
+                        <a href="https://github.com/IttsKK/jot/releases/tag/v1.1.1" class="btn btn-primary btn-small">Open 1.1.1</a>
+                        <a href="https://github.com/IttsKK/jot/blob/main/release-notes/1.1.1.md" class="release-link" target="_blank" rel="noopener noreferrer">View source note</a>
+                    </div>
+                </div>
+            </article>
+
+            <article class="release-card reveal delay-2">
+                <div class="release-meta">
+                    <span class="release-version">1.1.0</span>
+                    <span class="release-date">March 7, 2026</span>
+                </div>
+                <div class="release-content">
+                    <div class="release-body">
+                        <h2>Highlights</h2>
+                        <ul>
+                            <li>Added a dedicated Notes inbox for quick ideas, with <code>/n</code>, <code>/note</code>, and <code>//</code> shortcuts.</li>
+                            <li>Added meeting-aware capture with <code>/meeting</code>, <code>/summary</code>, and <code>/end</code>, plus grouped meeting views for notes, tasks, and follow-ups.</li>
+                            <li>Added a Today list window with its own hotkey so you can pull a focused set of tasks into your day.</li>
+                            <li>Improved quick capture so slash-command modes lock after a space and metadata updates live while you type.</li>
+                        </ul>
+                        <h2>Improvements</h2>
+                        <ul>
+                            <li>Follow-ups created during a meeting now inherit the active attendee when possible.</li>
+                            <li>Expanded the main app with better editing flows for notes, meetings, and task details.</li>
+                            <li>Added parser, command, and database coverage for the new capture flows.</li>
+                        </ul>
+                    </div>
+                    <div class="release-actions">
+                        <a href="https://github.com/IttsKK/jot/releases/tag/v1.1.0" class="btn btn-primary btn-small">Open 1.1.0</a>
+                        <a href="https://github.com/IttsKK/jot/blob/main/release-notes/1.1.0.md" class="release-link" target="_blank" rel="noopener noreferrer">View source note</a>
+                    </div>
+                </div>
+            </article>
+
+            <article class="release-card reveal delay-3">
+                <div class="release-meta">
+                    <span class="release-version">1.0.0</span>
+                    <span class="release-date">March 3, 2026</span>
+                </div>
+                <div class="release-content">
+                    <div class="release-body">
+                        <h2>Highlights</h2>
+                        <ul>
+                            <li>Initial repository bootstrap for Jot.</li>
+                            <li>Established the <code>v1.0.0</code> baseline tag used by later release automation and changelog history.</li>
+                        </ul>
+                        <h2>Notes</h2>
+                        <ul>
+                            <li>The <code>v1.0.0</code> tag points to the initial commit from March 3, 2026.</li>
+                            <li>The website, packaged release flow, and checked-in release note workflow were added in later 1.0.x and 1.1.x work.</li>
+                        </ul>
+                    </div>
+                    <div class="release-actions">
+                        <a href="https://github.com/IttsKK/jot/releases/tag/v1.0.0" class="btn btn-primary btn-small">Open 1.0.0</a>
+                        <a href="https://github.com/IttsKK/jot/blob/main/release-notes/1.0.0.md" class="release-link" target="_blank" rel="noopener noreferrer">View source note</a>
+                    </div>
+                </div>
+            </article>
         </section>
     </main>
 
@@ -48,10 +150,9 @@
                 <span>Jot for Mac</span>
             </div>
             <div class="footer-links">
-                <a href="#">Privacy Policy</a>
-                <a href="#">Terms of Service</a>
+                <a href="index.html">Home</a>
                 <a href="https://github.com/IttsKK/jot" target="_blank" rel="noopener noreferrer">GitHub</a>
-                <a href="https://twitter.com/">Twitter</a>
+                <a href="https://github.com/IttsKK/jot/releases/latest" target="_blank" rel="noopener noreferrer">Latest Release</a>
             </div>
             <div class="footer-copyright">
                 &copy; <script>document.write(new Date().getFullYear())</script> Jot. All rights reserved.
@@ -63,7 +164,6 @@
         @keyframes spin { to { transform: rotate(360deg); } }
         button.btn { font-family: inherit; font-size: inherit; cursor: pointer; }
         button.btn:disabled { opacity: 0.7; cursor: not-allowed; }
-        .download-btn { margin-top: 8px; }
     </style>
     <script>
         async function triggerNavDownload(btn) {
@@ -90,86 +190,18 @@
         }
 
         document.addEventListener('DOMContentLoaded', async () => {
-            const container = document.getElementById('releases-container');
-            
-            try {
-                // Fetch releases from GitHub API
-                const response = await fetch('https://api.github.com/repos/IttsKK/jot/releases');
-                if (!response.ok) throw new Error('Failed to fetch releases');
-                
-                const releases = await response.json();
-                
-                container.innerHTML = ''; // clear loading state
-                
-                if (releases.length === 0) {
-                    container.innerHTML = '<p class="empty-state">No releases found yet.</p>';
-                    return;
-                }
-                
-                releases.forEach((release, index) => {
-                    const date = new Date(release.published_at).toLocaleDateString('en-US', {
-                        year: 'numeric', month: 'long', day: 'numeric'
-                    });
-                    
-                    const releaseEl = document.createElement('div');
-                    releaseEl.className = 'release-card reveal';
-                    releaseEl.style.transitionDelay = `${index * 0.1}s`;
-                    
-                    let bodyHtml = '';
-                    if (release.body) {
-                        // Use marked.js to render markdown securely and properly
-                        bodyHtml = `<div class="release-body">${marked.parse(release.body)}</div>`;
+            const observer = new IntersectionObserver((entries, obs) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('active');
+                        obs.unobserve(entry.target);
                     }
-                    
-                    // Find the DMG asset for the download button, fallback to standard release url
-                    const dmgAsset = release.assets.find(a => a.name.endsWith('.dmg'));
-                    const downloadLink = dmgAsset ? dmgAsset.browser_download_url : release.html_url;
-
-                    releaseEl.innerHTML = `
-                        <div class="release-meta">
-                            <span class="release-version">${release.name || release.tag_name}</span>
-                            <span class="release-date">${date}</span>
-                            ${release.prerelease ? '<span class="badge prerelease">Pre-release</span>' : ''}
-                        </div>
-                        <div class="release-content">
-                            ${bodyHtml}
-                            <a href="${downloadLink}" class="btn btn-primary btn-small download-btn">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                    <polyline points="7 10 12 15 17 10"></polyline>
-                                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                                </svg>
-                                Download ${release.tag_name}
-                            </a>
-                        </div>
-                    `;
-                    
-                    container.appendChild(releaseEl);
                 });
-                
-                // Initialize Intersection Observer for reveal animations
-                const observerOptions = {
-                    root: null,
-                    rootMargin: '0px',
-                    threshold: 0.1
-                };
+            }, { rootMargin: '0px', threshold: 0.1 });
 
-                const observer = new IntersectionObserver((entries, obs) => {
-                    entries.forEach(entry => {
-                        if (entry.isIntersecting) {
-                            entry.target.classList.add('active');
-                            obs.unobserve(entry.target);
-                        }
-                    });
-                }, observerOptions);
-
-                document.querySelectorAll('.reveal').forEach((el) => {
-                    observer.observe(el);
-                });
-
-            } catch (error) {
-                container.innerHTML = '<p class="error-state">Failed to load releases. <a href="https://github.com/IttsKK/jot/releases" target="_blank">View on GitHub instead</a>.</p>';
-            }
+            document.querySelectorAll('.reveal').forEach((el) => {
+                observer.observe(el);
+            });
         });
     </script>
 </body>

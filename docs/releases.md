@@ -26,13 +26,19 @@ This repo uses a local-first release flow:
 
 ```bash
 # One command: bumps version, builds, signs, and uploads to GitHub
-./scripts/publish.sh 1.0.1
+./scripts/publish.sh 1.1.2
 
 # Or create a draft release first
-./scripts/publish.sh 1.0.1 --draft
+./scripts/publish.sh 1.1.2 --draft
 ```
 
 This requires a clean tracked worktree on `main`, bumps `Info.plist` version fields, runs `release.sh` (build + sign + DMG + appcast), copies the generated feed to `docs/appcast.xml`, commits the release metadata, pushes `main`, and creates a GitHub release targeting the pushed commit.
+
+## Release notes and changelog
+
+- Put the full GitHub release body in `release-notes/<version>.md`.
+- Keep the short human-readable summary in `CHANGELOG.md`.
+- Refresh `docs/releases.html` when shipping so the website mirrors the latest checked-in release notes instead of depending on the GitHub API for historical content.
 
 ## Local build prerequisites
 

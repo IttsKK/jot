@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jot - Minimal Task & Follow-up Tracker for macOS</title>
-    <meta name="description" content="Jot is a beautifully minimal task tracker and follow-up management app for macOS. Capture tasks instantly with a global hotkey.">
+    <title>Jot - Quick Capture for macOS</title>
+    <meta name="description" content="Jot is a macOS menu bar app for quick task capture, follow-ups, notes, and lightweight meeting tracking.">
     
     <link rel="stylesheet" href="style.css">
     
@@ -33,10 +33,10 @@
     <main>
         <section class="hero">
             <div class="hero-content reveal">
-                <div class="badge">Designed for macOS</div>
+                <div class="badge">Latest release: 1.1.2</div>
                 <h1 class="hero-title">Keep work and<br>follow ups moving.</h1>
                 <p class="hero-subtitle">
-                    A beautiful, zero-friction task tracker that lives out of your way until you need it.
+                    A native menu bar app for fast task capture, notes, meeting follow-ups, and a focused Today list.
                 </p>
                 <div class="hero-ctas">
                     <button id="hero-download-btn" class="btn btn-primary btn-large" onclick="triggerDownload(this)">
@@ -48,7 +48,7 @@
                         Download for Mac
                     </button>
                 </div>
-                <p class="hero-meta">Requires macOS 13.0 or later</p>
+                <p class="hero-meta">Requires macOS 14.0 or later</p>
             </div>
             
             <div class="hero-image-container reveal delay-1">
@@ -60,7 +60,7 @@
         <section id="features" class="features">
             <div class="section-header reveal">
                 <h2>Simplicity as a feature.</h2>
-                <p>Everything you need to stay on top of your tasks, with nothing you don't.</p>
+                <p>Quick capture first, with enough structure to keep tasks, follow-ups, notes, and meetings tidy.</p>
             </div>
 
             <div class="feature-grid">
@@ -69,11 +69,12 @@
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="17 11 12 6 7 11"/><line x1="12" y1="6" x2="12" y2="18"/></svg>
                     </div>
                     <h3>Global Quick Capture</h3>
-                    <p>Hit your custom hotkey from anywhere to instantly capture a thought, a task, or a quick follow-up without losing focus.</p>
+                    <p>Hit your custom hotkey from anywhere to capture a task, note, or follow-up without breaking context.</p>
                     <ul class="feature-list">
                         <li>Distraction-free overlay</li>
                         <li>Instant queue selection</li>
                         <li>Smart date parsing</li>
+                        <li>Meeting-aware commands</li>
                     </ul>
                 </div>
 
@@ -82,15 +83,15 @@
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
                     </div>
                     <h3>Native & Fast</h3>
-                    <p>Built exclusively for macOS. Jot feels right at home on your Mac, using native components for lightning-fast performance.</p>
+                    <p>Built for macOS 14+ with native UI, global hotkeys, Sparkle updates, and menu bar-first workflows.</p>
                 </div>
 
                 <div class="feature-card col reveal delay-3">
                     <div class="feature-icon">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
                     </div>
-                    <h3>Smart Queues</h3>
-                    <p>Organize your work effortlessly. Keep your main tasks separate from follow-ups, and review everything in one place.</p>
+                    <h3>Structured, Not Heavy</h3>
+                    <p>Split work, follow-ups, and notes cleanly, then pull a focused subset into Today when you need it.</p>
                 </div>
             </div>
         </section>
@@ -98,7 +99,7 @@
         <section id="download" class="cta-section reveal">
             <div class="cta-content">
                 <h2>Ready to declutter your mind?</h2>
-                <p>Start tracking your tasks the simple way today.</p>
+                <p>Download the current macOS build or read through the latest release notes first.</p>
                 <button class="btn btn-primary btn-large" onclick="triggerDownload(this)">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -107,7 +108,7 @@
                     </svg>
                     Download Jot Free
                 </button>
-                <p class="version-info" id="latest-version">Free</p>
+                <p class="version-info" id="latest-version">v1.1.2 • macOS 14+</p>
             </div>
         </section>
     </main>
@@ -119,10 +120,9 @@
                 <span>Jot for Mac</span>
             </div>
             <div class="footer-links">
-                <a href="#">Privacy Policy</a>
-                <a href="#">Terms of Service</a>
+                <a href="releases.html">Release Notes</a>
                 <a href="https://github.com/IttsKK/jot" target="_blank" rel="noopener noreferrer">GitHub</a>
-                <a href="https://twitter.com/">Twitter</a>
+                <a href="https://github.com/IttsKK/jot/releases/latest" target="_blank" rel="noopener noreferrer">Latest Release</a>
             </div>
             <div class="footer-copyright">
                 &copy; <script>document.write(new Date().getFullYear())</script> Jot. All rights reserved.
@@ -207,7 +207,7 @@
                 const release = await fetchLatestRelease();
                 const versionEl = document.getElementById('latest-version');
                 if (versionEl && release.tag_name) {
-                    versionEl.textContent = `${release.tag_name} • Free`;
+                    versionEl.textContent = `${release.tag_name} • macOS 14+`;
                 }
             } catch (_) {}
         });

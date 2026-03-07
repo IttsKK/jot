@@ -603,6 +603,16 @@ footer {
   font-size: 0.95rem;
 }
 
+.release-pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.12);
+  color: #9ec5ff;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 .badge.prerelease {
   background: rgba(255, 149, 0, 0.1);
   color: rgb(255, 179, 64);
@@ -652,6 +662,22 @@ footer {
   text-decoration: underline;
 }
 
+.release-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.release-link {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.release-link:hover {
+  color: var(--text-primary);
+}
+
 .loading-spinner, .empty-state, .error-state {
   text-align: center;
   color: var(--text-secondary);
@@ -661,4 +687,22 @@ footer {
 
 .error-state a {
   color: var(--accent-color);
+}
+
+@media (max-width: 600px) {
+  .releases-page {
+    padding: 110px 1.25rem 72px;
+  }
+
+  .releases-header {
+    margin-bottom: 40px;
+  }
+
+  .releases-header h1 {
+    font-size: 2.25rem;
+  }
+
+  .release-card {
+    padding: 24px;
+  }
 }

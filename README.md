@@ -10,6 +10,17 @@ A lightweight macOS menu bar app for quick task capture. Type a task in natural 
 - **Gentle notifications** — morning summary and due-date reminders with snooze
 - **Auto-updates** — built-in update checking via Sparkle
 
+## Current Release
+
+`1.1.2` is the latest published release as of March 7, 2026.
+
+- `1.1.2` improves Settings window activation from the menu bar and surfaces hotkey registration failures clearly.
+- `1.1.1` reworks shortcut capture and fixes incorrect menu bar shortcut labels.
+- `1.1.0` adds the Notes inbox, meeting capture, and the Today Focus window.
+- `1.0.0` is the initial repository baseline tag from March 3, 2026.
+
+See [CHANGELOG.md](CHANGELOG.md) for the condensed history and [`release-notes/`](release-notes) for version-specific release bodies.
+
 ## Requirements
 
 - macOS 14 (Sonoma) or later
@@ -27,15 +38,15 @@ swift test
 ```bash
 # One command: bumps version, builds, signs, refreshes docs/appcast.xml,
 # commits the release metadata, pushes main, and creates the GitHub release
-./scripts/publish.sh 1.0.1
+./scripts/publish.sh 1.1.2
 
 # Or as a draft
-./scripts/publish.sh 1.0.1 --draft
+./scripts/publish.sh 1.1.2 --draft
 ```
 
 Run it from a clean `main` worktree with a matching `release-notes/<version>.md` file.
 
-See [docs/releases.md](docs/releases.md) for full setup details (signing keys, GitHub Pages, etc.).
+See [docs/releases.md](docs/releases.md) for the release workflow and setup details (signing keys, GitHub Pages, appcast publishing, etc.).
 
 ## License
 
