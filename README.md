@@ -1,30 +1,53 @@
 # Jot
 
-A lightweight macOS menu bar app for quick task capture. Type a task in natural language, hit Enter, and get back to work.
+Jot is a local-first macOS capture app for tasks, follow-ups, notes, and meetings. It lives in the menu bar, opens a fast global capture overlay, and keeps a fuller main window and Today list close by when you need them.
 
-## Features
+## What Jot Does
 
-- **Quick capture overlay** — global hotkey opens an Alfred-style input panel; parses dates, people, queues, and notes from plain text
-- **Two queues** — Work and Reach Out, with smart defaults (`/w`, `/r` shortcuts)
-- **Menu bar first** — lives in the status bar with a summary of today's tasks; no Dock icon
-- **Gentle notifications** — morning summary and due-date reminders with snooze
-- **Auto-updates** — built-in update checking via Sparkle
+- **Quick capture from anywhere** with a global shortcut and natural-language parsing for dates, people, notes, and queue changes
+- **Three queues** for Work, Follow Up, and Notes, plus a separate Today list for what matters right now
+- **Meeting-aware capture** so you can start a meeting, jot notes and follow-ups during it, and keep everything attached to that meeting
+- **Main app window** for browsing queues, editing tasks, reviewing meetings, and managing Today Focus
+- **Customizable hotkeys** recorded directly from the keyboard in Settings
+- **Local notifications** for the morning summary and due follow-ups with done and snooze actions
+- **Sparkle updates** for packaged app installs via the published appcast
+
+## Quick Capture Commands
+
+Jot works with plain text, but it also supports slash commands for faster mode switching:
+
+- `/w` for Work
+- `/f` for Follow Up
+- `/n` for Note
+- `/meeting` to start a meeting from a single draft
+- `/end` to end the current meeting with an optional summary
+- `/summary` to update the current meeting summary
+- `/t` to add the item to the Today list
+
+Examples:
+
+- `email Tyler tomorrow`
+- `/f Bob wednesday`
+- `/n pricing idea from support call`
+- `/meeting Product roadmap with Tyler`
+- `/t finish release notes`
 
 ## Current Release
 
-`1.1.2` is the latest published release as of March 7, 2026.
+`1.1.3` is the latest published release as of March 7, 2026.
 
-- `1.1.2` improves Settings window activation from the menu bar and surfaces hotkey registration failures clearly.
+- `1.1.3` simplifies meeting capture, makes `/f` the default follow-up command, and reduces quick-capture chip noise for bare slash input.
+- `1.1.2` fixes Settings window activation from the menu bar, surfaces hotkey registration failures, and tightens the release flow.
 - `1.1.1` reworks shortcut capture and fixes incorrect menu bar shortcut labels.
-- `1.1.0` adds the Notes inbox, meeting capture, and the Today Focus window.
-- `1.0.0` is the initial repository baseline tag from March 3, 2026.
+- `1.1.0` adds the notes queue, meeting capture, and the Today Focus window.
 
 See [CHANGELOG.md](CHANGELOG.md) for the condensed history and [`release-notes/`](release-notes) for version-specific release bodies.
 
 ## Requirements
 
-- macOS 14 (Sonoma) or later
+- macOS 14 or later
 - Swift 5.10+
+- A packaged `.app` build if you want notifications and Sparkle update checks to work
 
 ## Build
 
@@ -35,18 +58,29 @@ swift test
 
 ## Release
 
-```bash
-# One command: bumps version, builds, signs, refreshes docs/appcast.xml,
-# commits the release metadata, pushes main, and creates the GitHub release
-./scripts/publish.sh 1.1.2
+Create a matching release notes file first, then run:
 
-# Or as a draft
-./scripts/publish.sh 1.1.2 --draft
+```bash
+./scripts/publish.sh 1.1.3
 ```
+
+Or create the GitHub release as a draft:
+
+```bash
+./scripts/publish.sh 1.1.3 --draft
+```
+
+The publish script:
+
+- bumps the app version and build number
+- builds and signs the app, ZIP, DMG, and appcast
+- refreshes [`docs/appcast.xml`](docs/appcast.xml)
+- commits and pushes the release metadata to `main`
+- creates the GitHub release from the pushed commit
 
 Run it from a clean `main` worktree with a matching `release-notes/<version>.md` file.
 
-See [docs/releases.md](docs/releases.md) for the release workflow and setup details (signing keys, GitHub Pages, appcast publishing, etc.).
+See [docs/releases.md](docs/releases.md) for the full release setup and publishing details.
 
 ## License
 
