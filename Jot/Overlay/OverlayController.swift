@@ -111,7 +111,8 @@ final class OverlayController: NSObject {
 
     private func updatePanelFrame(height: CGFloat, animated: Bool) {
         guard let panel, panel.isVisible else { return }
-        let targetFrame = panelFrame(height: height)
+        var targetFrame = panelFrame(height: height)
+        targetFrame.origin.y = panel.frame.maxY - height
         if animated {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.2

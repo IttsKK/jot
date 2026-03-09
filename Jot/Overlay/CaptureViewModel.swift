@@ -40,9 +40,8 @@ final class CaptureViewModel: ObservableObject {
         if addToToday { return true }
         if isTypingCommandPrefix { return false }
 
-        if let lockedQueue {
-            guard lockedQueue != .thought else { return false }
-            return parsed.dueDate != nil || !(parsed.note?.isEmpty ?? true)
+        if lockedQueue != nil {
+            return true
         }
 
         return !trimmedInput.isEmpty
@@ -82,7 +81,7 @@ final class CaptureViewModel: ObservableObject {
     /// so the caller can bail early — `updateParse` will fire again after `input` changes.
     @discardableResult
     private func consumeNextCommand() -> Bool {
-        if let consumed = InputCommandParser.consumeLeadingCommand(from: input) {
+        if let consumed = consumeExecutedLeadingCommand(from: input) {
             input = InputCommandParser.expandedRemainder(for: consumed.command, remainder: consumed.remainder)
             switch consumed.command.kind {
             case let .queue(queue):
@@ -98,6 +97,20 @@ final class CaptureViewModel: ObservableObject {
             return true
         }
         return false
+    }
+
+    private func consumeExecutedLeadingCommand(from input: String) -> ConsumedInputCommand? {
+        let trimmedLeading = input.drop { $0.isWhitespace }
+        guard !trimmedLeading.isEmpty, trimmedLeading.first == "/" else { return nil }
+
+        guard let tokenEnd = trimmedLeading.firstIndex(where: \.isWhitespace) else {
+            return nil
+        }
+
+        let token = trimmedLeading[..<tokenEnd]
+        guard !token.isEmpty else { return nil }
+
+        return InputCommandParser.consumeLeadingCommand(from: String(trimmedLeading))
     }
 
     func save() throws {

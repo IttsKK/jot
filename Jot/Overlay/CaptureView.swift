@@ -11,9 +11,8 @@ struct CaptureView: View {
     private var isInMeeting: Bool { viewModel.meetingSession.isInMeeting }
     private var meetingTitle: String { viewModel.meetingSession.activeMeeting?.title ?? "" }
     private var activeCommand: InputCommand? { viewModel.activeCommand }
-    private var isThought: Bool { viewModel.lockedQueue == .thought || viewModel.parsed.queue == .thought }
-    private var hasLockedMode: Bool { viewModel.lockedQueue != nil }
-    private var shouldShowQueueModeChip: Bool { !hasLockedMode }
+    private var isThought: Bool { effectiveQueue == .thought }
+    private var effectiveQueue: TaskQueue { viewModel.lockedQueue ?? viewModel.parsed.queue }
     private var commandSuggestions: [InputCommand] { InputCommandParser.suggestedCommands(for: viewModel.input) }
 
     var body: some View {
@@ -156,12 +155,12 @@ struct CaptureView: View {
                 todayToggle
             }
 
-            if isThought, shouldShowQueueModeChip {
+            if isThought {
                 modeChip("Note", color: .indigo, isForced: viewModel.lockedQueue == .thought)
-            } else if shouldShowQueueModeChip {
-                modeChip("Queue: \(viewModel.parsed.queue.displayName)",
-                         color: queueColor(viewModel.parsed.queue),
-                         isForced: hasLockedMode)
+            } else {
+                modeChip("Queue: \(effectiveQueue.displayName)",
+                         color: queueColor(effectiveQueue),
+                         isForced: viewModel.lockedQueue != nil)
             }
 
             if !isThought {
