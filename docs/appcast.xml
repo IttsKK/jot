@@ -3,13 +3,13 @@
     <channel>
         <title>Jot</title>
         <item>
-            <title>1.1.3</title>
-            <pubDate>Sat, 07 Mar 2026 16:58:41 -0700</pubDate>
-            <sparkle:version>7</sparkle:version>
-            <sparkle:shortVersionString>1.1.3</sparkle:shortVersionString>
+            <title>1.1.4</title>
+            <pubDate>Sun, 08 Mar 2026 23:06:15 -0700</pubDate>
+            <sparkle:version>8</sparkle:version>
+            <sparkle:shortVersionString>1.1.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/IttsKK/jot/releases/download/v1.1.3/Jot-1.1.3.zip" length="4802177" type="application/octet-stream" sparkle:edSignature="VUkjZt2VmZ7e2UomjtM+8HtRLEDJvDgnWDVK0bbazQ1CzpX4lGfCOVH1uVe0q6qEWozDPOHoD4zL1+9VgmuTBg=="/>
+            <enclosure url="https://github.com/IttsKK/jot/releases/download/v1.1.4/Jot-1.1.4.zip" length="4802277" type="application/octet-stream" sparkle:edSignature="pkGNPw2sP5G00F3qMB88/5LaPux7h8KwmfLFNh7P1QMmgrsRR7wu98JygZN7nffQ0vvX1DH81+d3keEOu8VSCQ=="/>
         </item>
     </channel>
 </rss>
