@@ -305,21 +305,18 @@ a {
   grid-column: 1 / -1;
 }
 
-.feature-card-capture {
-  padding: 40px;
-}
-
-.feature-card-split {
+.feature-card.split {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  gap: 56px;
+  gap: 60px;
 }
 
-.feature-text {
+.feature-card.split .feature-text {
   flex: 1;
 }
 
-.feature-visual {
+.feature-card.split .feature-visual {
   flex: 1;
   position: relative;
   display: flex;
@@ -379,8 +376,8 @@ a {
   transform: translate(-50%, -50%);
   width: 120%;
   height: 120%;
-  background: radial-gradient(circle, rgba(139, 92, 246, 0.14) 0%, transparent 70%);
-  filter: blur(42px);
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.15) 0%, transparent 70%);
+  filter: blur(40px);
   z-index: 0;
 }
 
@@ -388,76 +385,43 @@ a {
   position: relative;
   z-index: 1;
   width: 100%;
-  max-width: 460px;
-  padding: 18px;
-  border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(28, 31, 39, 0.72);
+  max-width: 440px;
+  background: rgba(30, 30, 35, 0.65);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.18),
-    0 22px 48px rgba(0, 0, 0, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 
+    0 0 0 1px rgba(0, 0, 0, 0.2),
+    0 20px 40px rgba(0, 0, 0, 0.4);
   transform: perspective(1000px) rotateY(-5deg) rotateX(2deg);
-  transition: transform 0.4s ease, box-shadow 0.4s ease;
+  transition: transform 0.5s ease, box-shadow 0.5s ease;
   text-align: left;
 }
 
 .quick-capture-ui:hover {
-  transform: perspective(1000px) rotateY(0deg) rotateX(0deg) translateY(-4px);
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.18),
-    0 28px 64px rgba(0, 0, 0, 0.48);
-}
-
-.qc-command-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 14px;
-}
-
-.qc-command-pill,
-.qc-command-shortcut,
-.qc-chip {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 9999px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.qc-command-pill {
-  padding: 6px 11px;
-  background: rgba(245, 158, 11, 0.18);
-  border: 1px solid rgba(245, 158, 11, 0.34);
-  color: rgb(252, 211, 77);
-}
-
-.qc-command-shortcut {
-  padding: 5px 10px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.62);
+  transform: perspective(1000px) rotateY(0deg) rotateX(0deg) translateY(-5px);
+  box-shadow: 
+    0 0 0 1px rgba(0, 0, 0, 0.2),
+    0 30px 60px rgba(0, 0, 0, 0.5);
 }
 
 .qc-input-row {
   display: flex;
   align-items: center;
-  gap: 2px;
-  min-height: 32px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 22px;
   font-weight: 500;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.3px;
 }
 
 .qc-cursor {
   width: 2px;
   height: 24px;
+  background-color: var(--accent-color);
   margin-right: 2px;
-  background: var(--accent-color);
   animation: blink 1s step-start infinite;
 }
 
@@ -465,8 +429,8 @@ a {
   50% { opacity: 0; }
 }
 
-.qc-text {
-  color: rgba(255, 255, 255, 0.92);
+.qc-placeholder {
+  color: rgba(255, 255, 255, 0.4);
 }
 
 .qc-chip-row {
@@ -475,19 +439,17 @@ a {
 }
 
 .qc-chip {
-  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  display: inline-block;
 }
 
-.qc-follow-up {
-  background: rgba(245, 158, 11, 0.16);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  color: rgb(253, 186, 116);
-}
-
-.qc-date {
-  background: rgba(236, 72, 153, 0.16);
-  border: 1px solid rgba(236, 72, 153, 0.3);
-  color: rgb(249, 168, 212);
+.qc-work {
+  background: rgba(255, 149, 0, 0.18);
+  border: 1px solid rgba(255, 149, 0, 0.35);
+  color: rgb(255, 179, 64);
 }
 
 
@@ -611,12 +573,14 @@ footer {
 }
 
 @media (max-width: 900px) {
-  .feature-card-split {
-    display: block;
+  .feature-card.split {
+    flex-direction: column;
+    text-align: center;
+    padding: 32px;
   }
 
-  .feature-visual {
-    display: none;
+  .feature-list li {
+    justify-content: center;
   }
 }
 
