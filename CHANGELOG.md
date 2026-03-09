@@ -2,6 +2,32 @@
 
 All notable user-facing changes are tracked here. Detailed release bodies remain in [`release-notes/`](release-notes).
 
+## 1.1.4 - 2026-03-08
+
+### Highlights
+
+- Refined quick capture so slash commands only execute after a space, queue commands show their locked pill correctly, and meeting commands stop task parsing while active.
+- Kept the quick capture input anchored in place while the panel expands or shrinks.
+- Refreshed the website previews with a cleaner quick-capture mock and a dedicated Today checklist feature section.
+
+### Improvements
+
+- Added regression tests for quick-capture command execution and chip visibility.
+- Updated the landing page feature visuals and branding links to better match the current app.
+
+## 1.1.3 - 2026-03-07
+
+### Highlights
+
+- Simplified meeting capture so you can start a meeting from a single flexible draft like `Tyler`, `Product roadmap`, or `Product roadmap with Tyler`.
+- Made `/f` the default follow-up command while keeping `/r` as a compatibility alias.
+- Improved follow-up expansion so commands like `/f Bob wednesday` turn into a clearer "follow up with Bob" task while preserving the due date.
+
+### Improvements
+
+- Reduced quick-capture chip noise so bare slash command input no longer shows the default queue pill underneath.
+- Updated the meeting command prompts and end-meeting copy to better reflect the new draft-based flow and optional summary behavior.
+
 ## 1.0.0 - 2026-03-03
 
 ### Highlights
