@@ -44,6 +44,9 @@ final class AppContext: ObservableObject {
         statusBar.onCheckForUpdates = { [weak self] in
             self?.checkForUpdates()
         }
+        statusBar.onQuitCompletely = {
+            (NSApplication.shared.delegate as? AppDelegate)?.requestFullTermination()
+        }
         statusBar.canCheckForUpdates = canCheckForUpdates
     }
 
@@ -172,6 +175,16 @@ final class AppContext: ObservableObject {
 
     var canCheckForUpdates: Bool {
         Bundle.main.bundleURL.pathExtension == "app"
+    }
+
+    func closePrimaryWindowsKeepingBackgroundRunning() {
+        for window in NSApplication.shared.windows where window.isVisible && !(window is NSPanel) {
+            window.performClose(nil)
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.restoreAccessoryActivationIfNeeded()
+        }
     }
 
     private func handleMainWindowClosed() {

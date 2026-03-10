@@ -164,10 +164,73 @@ final class DatabaseManager {
         try dbQueue.read { db in
             try Task
                 .filter(Task.Columns.queue == TaskQueue.thought.rawValue)
-                .filter(Task.Columns.meetingId == nil)
                 .order(Task.Columns.position.asc, Task.Columns.createdAt.asc)
                 .fetchAll(db)
         }
+    }
+
+    @discardableResult
+    func captureMeetingNote(
+        rawInput: String,
+        content: String,
+        meetingId: String,
+        now: Date = .now
+    ) throws -> Task {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw NSError(
+                domain: "Jot.Database",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Meeting note content cannot be empty"]
+            )
+        }
+
+        let task = try dbQueue.write { db in
+            var meetingNotes = try Task
+                .filter(Task.Columns.queue == TaskQueue.thought.rawValue)
+                .filter(Task.Columns.meetingId == meetingId)
+                .order(Task.Columns.createdAt.asc)
+                .fetchAll(db)
+
+            if meetingNotes.isEmpty {
+                let maxPosition: Int64? = try Int64.fetchOne(
+                    db,
+                    sql: "SELECT MAX(position) FROM tasks WHERE queue = ?",
+                    arguments: [TaskQueue.thought.rawValue]
+                )
+                var task = Task(
+                    rawInput: trimmed,
+                    title: trimmed,
+                    queue: .thought,
+                    status: .active,
+                    createdAt: now,
+                    position: (maxPosition ?? -1) + 1,
+                    meetingId: meetingId
+                )
+                try task.insert(db)
+                return task
+            }
+
+            var primary = meetingNotes.removeFirst()
+            let existingParts = ([primary.title] + meetingNotes.map(\.title))
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+
+            primary.title = (existingParts + [trimmed]).joined(separator: "\n\n")
+            primary.rawInput = primary.title
+            primary.status = .active
+            primary.doneAt = nil
+            try primary.update(db)
+
+            for extra in meetingNotes {
+                try Task.deleteOne(db, key: extra.id)
+            }
+
+            return primary
+        }
+
+        notifyChange()
+        return task
     }
 
     func updateTask(_ task: Task) throws {

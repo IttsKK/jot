@@ -14,6 +14,7 @@ final class StatusBarController: NSObject {
     var onOpenDailyFocus: (() -> Void)?
     var onOpenSettings: (() -> Void)?
     var onCheckForUpdates: (() -> Void)?
+    var onQuitCompletely: (() -> Void)?
     var canCheckForUpdates: Bool = false
 
     init(database: DatabaseManager, settings: SettingsStore, overlay: OverlayController, meetingSession: MeetingSession) {
@@ -23,10 +24,7 @@ final class StatusBarController: NSObject {
         self.meetingSession = meetingSession
         super.init()
 
-        if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "Jot")
-            button.imagePosition = .imageOnly
-        }
+        configureStatusItemButton(isInMeeting: false)
 
         statusItem.menu = NSMenu()
         statusItem.menu?.delegate = self
@@ -76,7 +74,7 @@ final class StatusBarController: NSObject {
     }
 
     @objc private func quitApp() {
-        NSApplication.shared.terminate(nil)
+        onQuitCompletely?()
     }
 
     @objc private func startMeeting() {
@@ -153,18 +151,12 @@ final class StatusBarController: NSObject {
         checkForUpdatesItem.isEnabled = canCheckForUpdates
         menu.addItem(checkForUpdatesItem)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit Jot Completely", action: #selector(quitApp), keyEquivalent: "q"))
 
         menu.items.forEach { $0.target = self }
         statusItem.menu = menu
 
-        if let button = statusItem.button {
-            if meetingSession.isInMeeting {
-                button.image = NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: "Jot — In Meeting")
-            } else {
-                button.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "Jot")
-            }
-        }
+        configureStatusItemButton(isInMeeting: meetingSession.isInMeeting)
     }
 
     private func makeQuickAddMenuItem() -> NSMenuItem {
@@ -188,7 +180,7 @@ final class StatusBarController: NSObject {
 
     private func makeDailyFocusMenuItem() -> NSMenuItem {
         makeConfiguredMenuItem(
-            title: "Open Today Focus List",
+            title: "Today List",
             action: #selector(openDailyFocus),
             keyCode: settings.dailyFocusHotKeyCode,
             modifiers: settings.dailyFocusHotKeyModifiers
@@ -208,6 +200,30 @@ final class StatusBarController: NSObject {
         )
         item.keyEquivalentModifierMask = ShortcutFormatter.modifierMask(for: modifiers)
         return item
+    }
+
+    private func configureStatusItemButton(isInMeeting: Bool) {
+        guard let button = statusItem.button else { return }
+
+        let symbolName = isInMeeting ? "record.circle.fill" : "checklist"
+        let accessibilityDescription = isInMeeting ? "Jot — In Meeting" : "Jot"
+
+        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: accessibilityDescription)
+            ?? NSImage(systemSymbolName: "circle.grid.2x2.fill", accessibilityDescription: accessibilityDescription)
+
+        if let image {
+            image.isTemplate = true
+            button.image = image
+            button.title = ""
+            button.imagePosition = .imageOnly
+        } else {
+            button.image = nil
+            button.title = "J"
+            button.font = .systemFont(ofSize: 13, weight: .semibold)
+            button.imagePosition = .noImage
+        }
+
+        button.imageScaling = .scaleProportionallyDown
     }
 }
 

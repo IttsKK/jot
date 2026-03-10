@@ -118,6 +118,20 @@ final class DatabaseManagerTests: XCTestCase {
         XCTAssertEqual(items.first?.sourceTaskId, task.id)
     }
 
+    func testCaptureMeetingNoteConsolidatesLegacyMeetingNotes() throws {
+        let meeting = try db.createMeeting(title: "Roadmap")
+        let first = try db.createTask(rawInput: "first note", title: "First Note", queue: .thought, meetingId: meeting.id)
+        _ = try db.createTask(rawInput: "second note", title: "Second Note", queue: .thought, meetingId: meeting.id)
+
+        let merged = try db.captureMeetingNote(rawInput: "third note", content: "Third Note", meetingId: meeting.id)
+        let meetingThoughts = try db.fetchThoughts().filter { $0.meetingId == meeting.id }
+
+        XCTAssertEqual(meetingThoughts.count, 1)
+        XCTAssertEqual(meetingThoughts.first?.id, first.id)
+        XCTAssertEqual(merged.id, first.id)
+        XCTAssertEqual(meetingThoughts.first?.title, "First Note\n\nSecond Note\n\nThird Note")
+    }
+
     private func date(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int) -> Date {
         var components = DateComponents()
         components.year = year

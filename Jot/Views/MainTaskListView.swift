@@ -16,8 +16,9 @@ struct MainTaskListView: View {
     @State private var showEndMeetingSheet = false
     @State private var meetingDraftInput: String = ""
     @State private var meetingSummaryInput: String = ""
+    @State private var meetingSummaryDraft: String = ""
     @State private var taskDetailDraft: TaskDetailDraft? = nil
-    @State private var selectedInboxThoughtID: String? = nil
+    @State private var selectedNoteID: String? = nil
     @State private var thoughtEditorText: String = ""
     @State private var metadataEditorInput: String = ""
     @State private var sidebarDragStartWidth: CGFloat?
@@ -92,6 +93,7 @@ struct MainTaskListView: View {
         .task {
             try? viewModel.refresh()
             syncTaskDetailDraftFromSelection(force: true)
+            syncMeetingSummaryDraft()
         }
         .onChange(of: viewModel.tasks) { _, _ in
             viewModel.validateSelection()
@@ -102,8 +104,12 @@ struct MainTaskListView: View {
         }
         .onChange(of: viewModel.selectedItem) { _, newItem in
             viewModel.validateSelection()
-            if newItem != .inbox {
-                selectedInboxThoughtID = nil
+            if !supportsNoteSelection(for: newItem) {
+                closeThoughtEditor()
+            } else if case .meeting(let meetingID) = newItem,
+                      let selectedNote,
+                      selectedNote.meetingId != meetingID {
+                closeThoughtEditor()
             }
             if let queue = defaultComposerQueue(for: newItem) {
                 composer.queue = queue
@@ -112,6 +118,7 @@ struct MainTaskListView: View {
                     syncMetadataEditorInputFromSelection()
                 }
             }
+            syncMeetingSummaryDraft()
         }
         .onChange(of: viewModel.meetings) { _, meetings in
             if case .meeting(let id) = viewModel.selectedItem {
@@ -119,11 +126,12 @@ struct MainTaskListView: View {
                     viewModel.selectedItem = .all
                 }
             }
+            syncMeetingSummaryDraft()
         }
         .onChange(of: viewModel.thoughts) { _, thoughts in
-            if let selectedInboxThoughtID {
-                if thoughts.first(where: { $0.id == selectedInboxThoughtID }) == nil {
-                    self.selectedInboxThoughtID = nil
+            if let selectedNoteID {
+                if thoughts.first(where: { $0.id == selectedNoteID }) == nil {
+                    self.selectedNoteID = nil
                     thoughtEditorText = ""
                 }
             }
@@ -534,7 +542,7 @@ struct MainTaskListView: View {
             }
         }
         .padding(16)
-        .animation(.spring(response: 0.35, dampingFraction: 0.75), value: singleSelectedTask?.id)
+        .animation(.spring(response: 0.35, dampingFraction: 0.75), value: currentSelectedTask?.id)
     }
 
     // MARK: - Queue Content
@@ -555,10 +563,10 @@ struct MainTaskListView: View {
                 }
             }
 
-            if viewModel.selectedItem == .inbox, let thought = selectedInboxThought {
+            if viewModel.selectedItem == .inbox, let thought = selectedNote {
                 thoughtEditorPanel(thought)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
-            } else if let task = singleSelectedTask {
+            } else if let task = currentSelectedTask {
                 taskDetailsPanel(task: task)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             } else {
@@ -573,6 +581,7 @@ struct MainTaskListView: View {
     @ViewBuilder
     private var meetingContent: some View {
         if let meeting = viewModel.selectedMeeting {
+            let meetingItems = viewModel.tasksForMeeting(meeting)
             if meeting.isActive {
                 HStack {
                     Label("In Progress", systemImage: "record.circle.fill")
@@ -595,18 +604,18 @@ struct MainTaskListView: View {
                 .background(glassPanel(cornerRadius: 10))
             }
 
-            MeetingDetailView(
-                meeting: meeting,
-                items: viewModel.tasksForMeeting(meeting),
-                onUpdateSummary: { summary in viewModel.updateMeetingSummary(meeting, summary: summary) },
-                onToggleDone: { viewModel.toggleDone($0) },
-                onDelete: { viewModel.delete($0) }
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(glassPanel(cornerRadius: 16))
+            meetingPanel(meeting, items: meetingItems)
 
-            composerPanel
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            if let thought = selectedMeetingNote {
+                thoughtEditorPanel(thought)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else if let task = currentSelectedTask {
+                taskDetailsPanel(task: task)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else {
+                composerPanel
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         } else {
             VStack(spacing: 12) {
                 Image(systemName: "doc.text.magnifyingglass")
@@ -822,13 +831,13 @@ struct MainTaskListView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(glassPanel(cornerRadius: 16))
         .onTapGesture {
-            guard selectedInboxThoughtID != nil else { return }
+            guard selectedNoteID != nil else { return }
             closeThoughtEditor()
         }
     }
 
     private func thoughtRow(_ thought: Task) -> some View {
-        let isSelected = selectedInboxThoughtID == thought.id
+        let isSelected = selectedNoteID == thought.id
         return ThoughtRowView(
             thought: thought,
             isSelected: isSelected,
@@ -837,9 +846,16 @@ struct MainTaskListView: View {
         )
     }
 
-    private var selectedInboxThought: Task? {
-        guard let selectedInboxThoughtID else { return nil }
-        return viewModel.thoughts.first(where: { $0.id == selectedInboxThoughtID })
+    private var selectedNote: Task? {
+        guard let selectedNoteID else { return nil }
+        return viewModel.thoughts.first(where: { $0.id == selectedNoteID })
+    }
+
+    private var selectedMeetingNote: Task? {
+        guard case .meeting(let meetingID) = viewModel.selectedItem,
+              let note = selectedNote,
+              note.meetingId == meetingID else { return nil }
+        return note
     }
 
     private func thoughtEditorPanel(_ thought: Task) -> some View {
@@ -908,12 +924,13 @@ struct MainTaskListView: View {
     }
 
     private func openThoughtEditor(_ thought: Task) {
-        if selectedInboxThoughtID == thought.id {
-            selectedInboxThoughtID = nil
+        if selectedNoteID == thought.id {
+            selectedNoteID = nil
             return
         }
+        viewModel.clearSelection()
         thoughtEditorText = thought.title
-        selectedInboxThoughtID = thought.id
+        selectedNoteID = thought.id
     }
 
     private func saveThoughtEditor(_ thought: Task) {
@@ -933,7 +950,7 @@ struct MainTaskListView: View {
     }
 
     private func closeThoughtEditor() {
-        selectedInboxThoughtID = nil
+        selectedNoteID = nil
     }
 
     // MARK: - Task List
@@ -1286,9 +1303,15 @@ struct MainTaskListView: View {
         .buttonStyle(.plain)
     }
 
-    private var singleSelectedTask: Task? {
+    private var currentSelectedTask: Task? {
         guard viewModel.selectedTaskIDs.count == 1, let id = viewModel.selectedTaskIDs.first else { return nil }
-        return viewModel.visibleTasks.first(where: { $0.id == id })
+        switch viewModel.selectedItem {
+        case .meeting:
+            guard let meeting = viewModel.selectedMeeting else { return nil }
+            return viewModel.tasksForMeeting(meeting).first(where: { $0.id == id && $0.queue != .thought })
+        default:
+            return viewModel.visibleTasks.first(where: { $0.id == id })
+        }
     }
 
     // MARK: - Task Details Panel
@@ -1933,15 +1956,23 @@ struct MainTaskListView: View {
                 note: note
             )
         } else {
-            viewModel.createTask(
-                rawInput: composer.rawInput,
-                title: title,
-                queue: resolvedQueue,
-                person: person,
-                dueDate: dueDate,
-                note: note,
-                meetingId: composerMeetingId
-            )
+            if resolvedQueue == .thought, let meetingId = composerMeetingId {
+                viewModel.captureMeetingNote(
+                    rawInput: composer.rawInput,
+                    content: title,
+                    meetingId: meetingId
+                )
+            } else {
+                viewModel.createTask(
+                    rawInput: composer.rawInput,
+                    title: title,
+                    queue: resolvedQueue,
+                    person: person,
+                    dueDate: dueDate,
+                    note: note,
+                    meetingId: composerMeetingId
+                )
+            }
         }
 
         startNewComposer()
@@ -1954,7 +1985,7 @@ struct MainTaskListView: View {
     }
 
     private func syncTaskDetailDraftFromSelection(force: Bool = false) {
-        guard let task = singleSelectedTask else {
+        guard let task = currentSelectedTask else {
             taskDetailDraft = nil
             return
         }
@@ -2026,9 +2057,179 @@ struct MainTaskListView: View {
             note: TaskTextFormatter.formattedNote(draft.note)
         )
 
-        if let selected = singleSelectedTask, selected.id == draft.id {
+        if let selected = currentSelectedTask, selected.id == draft.id {
             resetTaskDetailDraft(from: selected)
         }
+    }
+
+    private func syncMeetingSummaryDraft() {
+        if case .meeting = viewModel.selectedItem {
+            meetingSummaryDraft = viewModel.selectedMeeting?.summary ?? ""
+        }
+    }
+
+    private func supportsNoteSelection(for item: TaskListViewModel.SidebarItem) -> Bool {
+        switch item {
+        case .inbox, .meeting:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func saveMeetingSummary(_ meeting: Meeting) {
+        let trimmed = meetingSummaryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        viewModel.updateMeetingSummary(meeting, summary: trimmed.isEmpty ? nil : TaskTextFormatter.formattedNote(trimmed))
+        meetingSummaryDraft = trimmed.isEmpty ? "" : TaskTextFormatter.formattedNote(trimmed) ?? ""
+    }
+
+    @ViewBuilder
+    private func meetingPanel(_ meeting: Meeting, items: [Task]) -> some View {
+        let notes = items.filter { $0.queue == .thought }
+        let tasks = items.filter { $0.queue == .work }
+        let followUps = items.filter { $0.queue == .reachOut }
+
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                meetingHeader(meeting)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label("Summary", systemImage: "text.bubble")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Save Summary") {
+                            saveMeetingSummary(meeting)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    }
+
+                    TextEditor(text: $meetingSummaryDraft)
+                        .font(.system(size: 14, weight: .regular))
+                        .scrollContentBackground(.hidden)
+                        .background(Color.clear)
+                        .frame(minHeight: 90)
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(.thinMaterial)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(panelStrokeColor, lineWidth: 1)
+                                )
+                        )
+                }
+
+                Divider()
+
+                if items.isEmpty {
+                    Text("Nothing captured yet during this meeting.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                } else {
+                    if !notes.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            sectionHeader("Notes")
+                            ForEach(notes) { thought in
+                                thoughtRow(thought)
+                            }
+                        }
+                    }
+
+                    if !tasks.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            sectionHeader("Tasks")
+                            ForEach(tasks) { task in
+                                meetingTaskRow(task)
+                            }
+                        }
+                    }
+
+                    if !followUps.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            sectionHeader("Follow Up")
+                            ForEach(followUps) { task in
+                                meetingTaskRow(task)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(glassPanel(cornerRadius: 16))
+    }
+
+    private func meetingHeader(_ meeting: Meeting) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(meeting.title)
+                .font(.system(size: 22, weight: .bold))
+
+            HStack(spacing: 12) {
+                if let start = meeting.startedAtValue {
+                    Label(meetingDateFormatter.string(from: start), systemImage: "calendar")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                if !meeting.formattedDuration.isEmpty {
+                    Label(meeting.formattedDuration, systemImage: "clock")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                if meeting.isActive {
+                    Label("In Progress", systemImage: "record.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.red)
+                }
+            }
+
+            if !meeting.attendeeList.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "person")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Text("With \(meeting.attendeeList.joined(separator: ", "))")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private func meetingTaskRow(_ task: Task) -> some View {
+        TaskRowView(
+            task: task,
+            isSelected: viewModel.selectedTaskIDs.contains(task.id),
+            showQueueBadge: false,
+            onToggle: { viewModel.toggleDone(task) }
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            closeThoughtEditor()
+            viewModel.selectedTaskIDs = [task.id]
+        }
+        .contextMenu {
+            Button("Edit") {
+                closeThoughtEditor()
+                beginEditing(task)
+            }
+            Button("Add to Today List") { viewModel.addTaskToDailyFocus(task) }
+            Button("Snooze") { viewModel.snooze(task) }
+            Button("Delete", role: .destructive) { viewModel.delete(task) }
+        }
+    }
+
+    private var meetingDateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
     }
 
     private func startNewComposer() {
@@ -2045,7 +2246,7 @@ struct MainTaskListView: View {
             return .work
         case .followUp:
             return .reachOut
-        case .inbox:
+        case .inbox, .meeting:
             return .thought
         default:
             return nil
@@ -2167,7 +2368,7 @@ struct MainTaskListView: View {
     // MARK: - Keyboard Handlers
 
     private func handleEscape() {
-        if viewModel.selectedItem == .inbox, selectedInboxThoughtID != nil {
+        if selectedNoteID != nil {
             closeThoughtEditor()
             return
         }
@@ -2187,19 +2388,21 @@ struct MainTaskListView: View {
 
     private func handleListArrowUp() -> Bool {
         guard focusedComposerField == nil else { return false }
+        if case .meeting = viewModel.selectedItem { return false }
         viewModel.moveSelectionUp()
         return true
     }
 
     private func handleListArrowDown() -> Bool {
         guard focusedComposerField == nil else { return false }
+        if case .meeting = viewModel.selectedItem { return false }
         viewModel.moveSelectionDown()
         return true
     }
 
     private func handleListEnter() -> Bool {
         guard focusedComposerField == nil else { return false }
-        guard let task = singleSelectedTask else { return false }
+        guard let task = currentSelectedTask else { return false }
         beginEditing(task)
         return true
     }
@@ -2233,6 +2436,7 @@ struct MainTaskListView: View {
 
     private func handleSelectAll() -> Bool {
         guard focusedComposerField == nil else { return false }
+        guard viewModel.selectedMeeting == nil else { return false }
         viewModel.selectAll()
         return true
     }

@@ -64,8 +64,40 @@ final class CaptureViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.activeCommand?.kind, .meetingStart)
         XCTAssertEqual(viewModel.parsed.title, "Tyler tomorrow")
         XCTAssertNil(viewModel.parsed.dueDate)
-        XCTAssertEqual(viewModel.parsed.queue, .work)
+        XCTAssertEqual(viewModel.parsed.queue, .thought)
         XCTAssertFalse(viewModel.showChips)
+    }
+
+    func testDefaultCaptureSavesThoughtWhenNoQueueIsSpecified() throws {
+        let viewModel = try makeViewModel()
+
+        viewModel.input = "capture this idea"
+        viewModel.updateParse()
+        try viewModel.save()
+
+        let thoughts = try viewModel.database.fetchThoughts()
+        XCTAssertEqual(thoughts.count, 1)
+        XCTAssertEqual(thoughts.first?.queue, .thought)
+        XCTAssertEqual(thoughts.first?.title, "Capture This Idea")
+    }
+
+    func testMeetingNoteCaptureAppendsIntoSingleThought() throws {
+        let viewModel = try makeViewModel()
+        try viewModel.meetingSession.startMeeting(title: "Roadmap", attendees: nil)
+
+        viewModel.input = "first note"
+        viewModel.updateParse()
+        try viewModel.save()
+
+        viewModel.input = "second note"
+        viewModel.updateParse()
+        try viewModel.save()
+
+        let thoughts = try viewModel.database.fetchThoughts()
+        XCTAssertEqual(thoughts.count, 1)
+        XCTAssertEqual(thoughts.first?.queue, .thought)
+        XCTAssertEqual(thoughts.first?.meetingId, viewModel.meetingSession.activeMeeting?.id)
+        XCTAssertEqual(thoughts.first?.title, "First Note\n\nSecond Note")
     }
 
     private func makeViewModel() throws -> CaptureViewModel {

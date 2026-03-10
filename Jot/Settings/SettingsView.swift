@@ -4,6 +4,8 @@ import Carbon
 struct SettingsView: View {
     @ObservedObject var settings: SettingsStore
     let database: DatabaseManager
+    let onCheckForUpdates: () -> Void
+    let canCheckForUpdates: Bool
 
     @State private var confirmReset = false
 
@@ -16,13 +18,39 @@ struct SettingsView: View {
                             .labelsHidden()
                     }
 
+                    settingsDivider()
+
                     settingRow("Default queue", detail: "Used for quick capture when no queue is specified.") {
                         Picker("Default queue", selection: $settings.defaultQueue) {
-                            Text("Work").tag(TaskQueue.work)
-                            Text("Follow Up").tag(TaskQueue.reachOut)
+                            ForEach(TaskQueue.allCases, id: \.self) { queue in
+                                Text(queue.displayName).tag(queue)
+                            }
                         }
                         .labelsHidden()
                         .frame(width: 180)
+                    }
+                }
+
+                settingsSection("About", description: "Version details and app updates.") {
+                    valueRow("Version", detail: "The installed Jot build currently running.") {
+                        Text(appVersionDescription)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    settingsDivider()
+
+                    actionRow(
+                        "Check for Updates",
+                        detail: canCheckForUpdates
+                            ? "Look for a newer version now."
+                            : "Available when Jot is running from an installed .app build.",
+                        isEnabled: canCheckForUpdates
+                    ) {
+                        Button("Check Now") {
+                            onCheckForUpdates()
+                        }
+                        .disabled(!canCheckForUpdates)
                     }
                 }
             }
@@ -32,6 +60,7 @@ struct SettingsView: View {
                 settingsSection("Hotkeys", description: "Global shortcuts for capture and window management.") {
                     if let hotKeyRegistrationError = settings.hotKeyRegistrationError {
                         hotkeyErrorMessage(hotKeyRegistrationError)
+                        settingsDivider()
                     }
 
                     hotkeyEditor(
@@ -41,12 +70,16 @@ struct SettingsView: View {
                         description: "Toggles quick capture from anywhere."
                     )
 
+                    settingsDivider()
+
                     hotkeyEditor(
                         title: "Open App",
                         keyCode: $settings.openAppHotKeyCode,
                         modifiers: $settings.openAppHotKeyModifiers,
                         description: "Brings the main app window forward."
                     )
+
+                    settingsDivider()
 
                     hotkeyEditor(
                         title: "Today List",
@@ -67,6 +100,8 @@ struct SettingsView: View {
                         .frame(width: 180)
                     }
 
+                    settingsDivider()
+
                     settingRow("Show command previews", detail: "Preview slash commands automatically in quick capture. If off, press Tab to reveal them.") {
                         Toggle("", isOn: $settings.quickCaptureCommandPreviewEnabled)
                             .labelsHidden()
@@ -82,26 +117,44 @@ struct SettingsView: View {
                             .labelsHidden()
                     }
 
+                    settingsDivider()
+
                     settingRow("Morning summary", detail: "Send a daily summary at the configured time.") {
                         Toggle("", isOn: $settings.summaryEnabled)
                             .labelsHidden()
                     }
 
-                    settingRow("Summary hour", detail: "24-hour time.") {
+                    settingsDivider()
+
+                    settingRow(
+                        "Summary hour",
+                        detail: "24-hour time.",
+                        isEnabled: settings.notificationsEnabled && settings.summaryEnabled
+                    ) {
                         Stepper(value: $settings.summaryHour, in: 0...23) {
                             Text("\(settings.summaryHour)")
                                 .monospacedDigit()
                         }
                         .frame(width: 120)
+                        .disabled(!settings.notificationsEnabled || !settings.summaryEnabled)
                     }
 
-                    settingRow("Summary minute", detail: "Minute of the hour.") {
+                    settingsDivider()
+
+                    settingRow(
+                        "Summary minute",
+                        detail: "Minute of the hour.",
+                        isEnabled: settings.notificationsEnabled && settings.summaryEnabled
+                    ) {
                         Stepper(value: $settings.summaryMinute, in: 0...59) {
                             Text(String(format: "%02d", settings.summaryMinute))
                                 .monospacedDigit()
                         }
                         .frame(width: 120)
+                        .disabled(!settings.notificationsEnabled || !settings.summaryEnabled)
                     }
+
+                    settingsDivider()
 
                     settingRow("Default snooze", detail: "How long reminder snoozes last.") {
                         Stepper(value: $settings.snoozeDays, in: 1...30) {
@@ -131,15 +184,7 @@ struct SettingsView: View {
 
             settingsPage {
                 settingsSection("Data", description: "Danger zone for local app state.") {
-                    HStack(alignment: .center) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Reset all data")
-                                .font(.headline)
-                            Text("Permanently delete all tasks, meetings, and Today list items.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
+                    actionRow("Reset all data", detail: "Permanently delete all tasks, meetings, and Today list items.") {
                         Button("Reset all data", role: .destructive) {
                             confirmReset = true
                         }
@@ -199,6 +244,7 @@ struct SettingsView: View {
     private func settingRow<Control: View>(
         _ title: String,
         detail: String,
+        isEnabled: Bool = true,
         @ViewBuilder control: () -> Control
     ) -> some View {
         HStack(alignment: .center, spacing: 16) {
@@ -214,6 +260,30 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
+        .opacity(isEnabled ? 1 : 0.6)
+    }
+
+    private func valueRow<Value: View>(
+        _ title: String,
+        detail: String,
+        isEnabled: Bool = true,
+        @ViewBuilder value: () -> Value
+    ) -> some View {
+        settingRow(title, detail: detail, isEnabled: isEnabled, control: value)
+    }
+
+    private func actionRow<Action: View>(
+        _ title: String,
+        detail: String,
+        isEnabled: Bool = true,
+        @ViewBuilder action: () -> Action
+    ) -> some View {
+        settingRow(title, detail: detail, isEnabled: isEnabled, control: action)
+    }
+
+    private func settingsDivider() -> some View {
+        Divider()
+            .padding(.leading, 16)
     }
 
     private func hotkeyEditor(
@@ -250,6 +320,17 @@ struct SettingsView: View {
         )
         .padding(.horizontal, 16)
         .padding(.top, 16)
+    }
+
+    private var appVersionDescription: String {
+        let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+        let buildNumber = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+
+        guard let buildNumber, !buildNumber.isEmpty else {
+            return shortVersion
+        }
+
+        return "\(shortVersion) (\(buildNumber))"
     }
 }
 

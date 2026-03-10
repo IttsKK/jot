@@ -121,7 +121,7 @@ final class SettingsStore: ObservableObject {
         launchAtLogin = defaults.object(forKey: UserDefaultKeys.launchAtLogin) as? Bool ?? false
 
         let rawDefaultQueue = defaults.string(forKey: UserDefaultKeys.defaultQueue)
-        defaultQueue = TaskQueue(rawValue: rawDefaultQueue ?? TaskQueue.work.rawValue) ?? .work
+        defaultQueue = TaskQueue(rawValue: rawDefaultQueue ?? TaskQueue.thought.rawValue) ?? .thought
 
         let legacyCode = defaults.integer(forKey: UserDefaultKeys.hotKeyCode)
         let legacyModifiers = defaults.integer(forKey: UserDefaultKeys.hotKeyModifiers)

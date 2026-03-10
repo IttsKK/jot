@@ -73,7 +73,9 @@ final class TaskListViewModel: ObservableObject {
         case .work:     return tasks.filter { $0.queue == .work }
         case .followUp: return tasks.filter { $0.queue == .reachOut }
         case .inbox:    return []
-        case .meeting:  return []
+        case .meeting:
+            guard let meeting = selectedMeeting else { return [] }
+            return tasksForMeeting(meeting)
         }
     }
 
@@ -118,6 +120,10 @@ final class TaskListViewModel: ObservableObject {
 
     func createTask(rawInput: String, title: String, queue: TaskQueue, person: String?, dueDate: Date?, note: String?, meetingId: String? = nil, dailyFocusDate: String? = nil) {
         _ = try? database.createTask(rawInput: rawInput, title: title, queue: queue, person: person, dueDate: dueDate, note: note, meetingId: meetingId, dailyFocusDate: dailyFocusDate)
+    }
+
+    func captureMeetingNote(rawInput: String, content: String, meetingId: String) {
+        _ = try? database.captureMeetingNote(rawInput: rawInput, content: content, meetingId: meetingId)
     }
 
     func updateTask(id: String, rawInput: String, title: String, queue: TaskQueue, status: TaskStatus, person: String?, dueDate: Date?, note: String?) {

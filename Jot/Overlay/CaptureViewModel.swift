@@ -19,6 +19,10 @@ final class CaptureViewModel: ObservableObject {
     let meetingSession: MeetingSession
     private var commandSuggestionsForced = false
 
+    private var defaultCaptureQueue: TaskQueue {
+        meetingSession.isInMeeting ? .thought : settings.defaultQueue
+    }
+
     private var trimmedInput: String {
         input.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -51,7 +55,7 @@ final class CaptureViewModel: ObservableObject {
         if consumeNextCommand() { return }
 
         if input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let queue = lockedQueue ?? settings.defaultQueue
+            let queue = lockedQueue ?? defaultCaptureQueue
             let type: ParsedTaskType = queue == .thought ? .thought : .task
             parsed = ParsedTask(rawInput: "", title: "", type: type, queue: queue, person: nil, dueDate: nil, note: nil)
             refreshCommandSuggestionVisibility()
@@ -141,6 +145,9 @@ final class CaptureViewModel: ObservableObject {
         if let q = lockedQueue {
             effective.queue = q
             if q == .thought { effective.type = .thought }
+        } else if shouldDefaultToNoteCapture(for: raw) {
+            effective.queue = .thought
+            effective.type = .thought
         }
 
         let title = TaskTextFormatter.formattedTitle(effective.title)
@@ -155,16 +162,24 @@ final class CaptureViewModel: ObservableObject {
 
         let dailyFocusDate = addToToday ? DatabaseManager.dayKey(for: .now) : nil
 
-        try database.createTask(
-            rawInput: input,
-            title: title,
-            queue: effective.queue,
-            person: person,
-            dueDate: effective.dueDate,
-            note: TaskTextFormatter.formattedNote(effective.note),
-            meetingId: meetingId,
-            dailyFocusDate: dailyFocusDate
-        )
+        if effective.queue == .thought, let meetingId {
+            try database.captureMeetingNote(
+                rawInput: input,
+                content: title,
+                meetingId: meetingId
+            )
+        } else {
+            try database.createTask(
+                rawInput: input,
+                title: title,
+                queue: effective.queue,
+                person: person,
+                dueDate: effective.dueDate,
+                note: TaskTextFormatter.formattedNote(effective.note),
+                meetingId: meetingId,
+                dailyFocusDate: dailyFocusDate
+            )
+        }
         clear()
     }
 
@@ -258,5 +273,11 @@ final class CaptureViewModel: ObservableObject {
         } else {
             showCommandSuggestions = commandSuggestionsForced
         }
+    }
+
+    private func shouldDefaultToNoteCapture(for parsed: ParsedTask) -> Bool {
+        guard defaultCaptureQueue == .thought else { return false }
+        guard parsed.queue == .work, parsed.type == .task else { return false }
+        return input.range(of: #"(?:^|\s)/(?:w|r|t)(?=\s|$)"#, options: .regularExpression) == nil
     }
 }

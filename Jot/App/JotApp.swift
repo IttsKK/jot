@@ -7,7 +7,12 @@ struct JotApp: App {
 
     var body: some Scene {
         Settings {
-            SettingsView(settings: context.settings, database: context.database)
+            SettingsView(
+                settings: context.settings,
+                database: context.database,
+                onCheckForUpdates: { context.checkForUpdates() },
+                canCheckForUpdates: context.canCheckForUpdates
+            )
         }
     }
 }
