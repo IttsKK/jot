@@ -2,6 +2,19 @@
 
 All notable user-facing changes are tracked here. Detailed release bodies remain in [`release-notes/`](release-notes).
 
+## 1.1.5 - 2026-03-10
+
+### Highlights
+
+- Added a Check for Updates action directly in Settings for packaged installs.
+- Cleaned up the Settings layout, restored the missing Notes default queue option, and made notification timing controls behave more consistently.
+- Separated the main app UI lifecycle from the menu bar workflow so closing or quitting the app window keeps background capture surfaces alive.
+
+### Improvements
+
+- Hardened the menu bar icon with template rendering and visible fallbacks.
+- Clarified full-process termination in the menu bar as `Quit Jot Completely`.
+
 ## 1.1.4 - 2026-03-08
 
 ### Highlights

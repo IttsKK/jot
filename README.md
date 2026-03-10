@@ -34,12 +34,11 @@ Examples:
 
 ## Current Release
 
-`1.1.3` is the latest published release as of March 7, 2026.
+`1.1.5` is the latest published release as of March 10, 2026.
 
+- `1.1.5` adds update checks in Settings, fixes the menu bar icon fallback, and lets the main app UI close without taking down the background capture surfaces.
+- `1.1.4` refines quick capture command execution and refreshes the website previews.
 - `1.1.3` simplifies meeting capture, makes `/f` the default follow-up command, and reduces quick-capture chip noise for bare slash input.
-- `1.1.2` fixes Settings window activation from the menu bar, surfaces hotkey registration failures, and tightens the release flow.
-- `1.1.1` reworks shortcut capture and fixes incorrect menu bar shortcut labels.
-- `1.1.0` adds the notes queue, meeting capture, and the Today Focus window.
 
 See [CHANGELOG.md](CHANGELOG.md) for the condensed history and [`release-notes/`](release-notes) for version-specific release bodies.
 
