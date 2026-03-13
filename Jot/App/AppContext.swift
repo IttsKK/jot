@@ -178,6 +178,13 @@ final class AppContext: ObservableObject {
     }
 
     func closePrimaryWindowsKeepingBackgroundRunning() {
+        dismissFrontendKeepingBackgroundRunning()
+    }
+
+    func dismissFrontendKeepingBackgroundRunning() {
+        overlay.hide()
+        dailyFocusWindowController?.hide()
+
         for window in NSApplication.shared.windows where window.isVisible && !(window is NSPanel) {
             window.performClose(nil)
         }

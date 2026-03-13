@@ -3,7 +3,6 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let context = AppContext.shared
-    private var allowsFullTermination = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -19,15 +18,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func requestFullTermination() {
-        allowsFullTermination = true
         NSApplication.shared.terminate(nil)
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if allowsFullTermination {
-            return .terminateNow
-        }
-        context.closePrimaryWindowsKeepingBackgroundRunning()
-        return .terminateCancel
+        .terminateNow
     }
 }

@@ -21,6 +21,19 @@ struct JotApp: App {
                 }
                 .disabled(!context.canCheckForUpdates)
             }
+            CommandGroup(replacing: .appTermination) {
+                Button("Close Jot") {
+                    context.dismissFrontendKeepingBackgroundRunning()
+                }
+                .keyboardShortcut("q")
+
+                Divider()
+
+                Button("Quit Jot Completely") {
+                    appDelegate.requestFullTermination()
+                }
+                .keyboardShortcut("q", modifiers: [.command, .shift])
+            }
         }
     }
 }
