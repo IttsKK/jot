@@ -2,6 +2,17 @@
 
 All notable user-facing changes are tracked here. Detailed release bodies remain in [`release-notes/`](release-notes).
 
+## 1.1.8 - 2026-03-12
+
+### Highlights
+
+- Reworked Jot's quit behavior so `Close Jot` dismisses the frontend and returns the app to background/menu-bar mode, while `Quit Jot Completely` performs a real app termination.
+- Fixed the frontend dismissal path so closing Jot hides the main UI, overlay, and Today panel before restoring accessory/background mode.
+
+### Improvements
+
+- Restored normal macOS termination semantics for actual quit requests instead of intercepting every quit event and keeping the process alive.
+
 ## 1.1.7 - 2026-03-12
 
 ### Highlights
