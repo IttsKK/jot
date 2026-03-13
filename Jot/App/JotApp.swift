@@ -14,5 +14,13 @@ struct JotApp: App {
                 canCheckForUpdates: context.canCheckForUpdates
             )
         }
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates...") {
+                    context.checkForUpdates()
+                }
+                .disabled(!context.canCheckForUpdates)
+            }
+        }
     }
 }

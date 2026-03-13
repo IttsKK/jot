@@ -82,8 +82,8 @@ final class AppContext: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.restoreAccessoryActivationIfNeeded()
+            _Concurrency.Task { @MainActor [weak self] in
+                self?.scheduleRestoreAccessoryActivationIfNeeded()
             }
         }
     }
@@ -182,13 +182,18 @@ final class AppContext: ObservableObject {
             window.performClose(nil)
         }
 
-        DispatchQueue.main.async { [weak self] in
-            self?.restoreAccessoryActivationIfNeeded()
-        }
+        scheduleRestoreAccessoryActivationIfNeeded()
     }
 
     private func handleMainWindowClosed() {
-        restoreAccessoryActivationIfNeeded()
+        scheduleRestoreAccessoryActivationIfNeeded()
+    }
+
+    private func scheduleRestoreAccessoryActivationIfNeeded() {
+        _Concurrency.Task { @MainActor [weak self] in
+            await _Concurrency.Task.yield()
+            self?.restoreAccessoryActivationIfNeeded()
+        }
     }
 
     private func restoreAccessoryActivationIfNeeded() {
