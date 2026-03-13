@@ -192,11 +192,30 @@ final class AppContext: ObservableObject {
     }
 
     private func restoreAccessoryActivationIfNeeded() {
-        let hasVisibleStandardWindow = NSApplication.shared.windows.contains { window in
-            window.isVisible && !(window is NSPanel)
-        }
+        let hasVisibleStandardWindow = hasVisibleStandardWindow()
         if !hasVisibleStandardWindow {
             NSApplication.shared.setActivationPolicy(.accessory)
+            hideAppIfFullyBackgrounded()
+        }
+    }
+
+    private func hasVisibleStandardWindow() -> Bool {
+        NSApplication.shared.windows.contains { window in
+            window.isVisible && !(window is NSPanel)
+        }
+    }
+
+    private func hasVisibleWindow() -> Bool {
+        NSApplication.shared.windows.contains(where: \.isVisible)
+    }
+
+    private func hideAppIfFullyBackgrounded() {
+        guard NSApplication.shared.isActive else { return }
+        guard !hasVisibleWindow() else { return }
+
+        DispatchQueue.main.async {
+            guard !self.hasVisibleWindow() else { return }
+            NSApplication.shared.hide(nil)
         }
     }
 
