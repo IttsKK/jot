@@ -2,6 +2,17 @@
 
 All notable user-facing changes are tracked here. Detailed release bodies remain in [`release-notes/`](release-notes).
 
+## 1.1.6 - 2026-03-12
+
+### Highlights
+
+- Fixed background mode so Jot no longer leaves a Dock icon behind after the main app window closes.
+- Kept the accessory-mode transition aligned with the app's window state so menu bar-only usage behaves like a true background app again.
+
+### Improvements
+
+- Preserved existing panel behavior by only hiding the app when no visible windows remain at all.
+
 ## 1.1.5 - 2026-03-10
 
 ### Highlights
