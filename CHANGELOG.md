@@ -2,6 +2,17 @@
 
 All notable user-facing changes are tracked here. Detailed release bodies remain in [`release-notes/`](release-notes).
 
+## 1.1.7 - 2026-03-12
+
+### Highlights
+
+- Fixed the app lifecycle so closing the main Jot window fully dismisses the app frontend and Dock icon while quick capture, Today, and shortcuts keep running in the background.
+- Added `Check for Updates...` to the standard Jot app menu so packaged installs can trigger Sparkle from the macOS menu bar as well as the status item.
+
+### Improvements
+
+- Deferred the accessory-mode restore until AppKit finishes the close transition, which avoids the app getting stuck visible in regular app mode.
+
 ## 1.1.6 - 2026-03-12
 
 ### Highlights
