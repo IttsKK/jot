@@ -154,8 +154,8 @@ enum TaskParser {
             }
         }
 
-        if let matched = firstMatch(#"\bnext week\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b"#, in: lower),
-           let dayToken = matched.captures[0],
+        if let matched = firstMatch(nextWeekWeekdayPattern, in: lower),
+           let dayToken = matched.captures.compactMap({ $0 }).first,
            let targetWeekday = weekdayNumber(for: dayToken),
            let currentWeekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)),
            let nextWeekStart = calendar.date(byAdding: .weekOfYear, value: 1, to: currentWeekStart),
@@ -406,13 +406,13 @@ enum TaskParser {
 
     private static func weekdayNumber(for token: String) -> Int? {
         switch token.lowercased() {
-        case "sunday": return 1
-        case "monday": return 2
-        case "tuesday": return 3
-        case "wednesday": return 4
-        case "thursday": return 5
-        case "friday": return 6
-        case "saturday": return 7
+        case "sunday", "sun": return 1
+        case "monday", "mon": return 2
+        case "tuesday", "tue", "tues": return 3
+        case "wednesday", "wed": return 4
+        case "thursday", "thu", "thur", "thurs": return 5
+        case "friday", "fri": return 6
+        case "saturday", "sat": return 7
         default: return nil
         }
     }
@@ -479,3 +479,5 @@ private struct RegexMatch {
     var range: NSRange
     var captures: [String?]
 }
+
+private let nextWeekWeekdayPattern = #"\b(?:next\s+week\s+(?:on\s+)?(monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat|sunday|sun)|(monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat|sunday|sun)\s+next\s+week)\b"#

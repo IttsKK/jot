@@ -104,6 +104,24 @@ final class TaskParserTests: XCTestCase {
         XCTAssertEqual(dayString(parsed.dueDate), "2026-03-12")
     }
 
+    func testNextWeekTuesdayParsing() {
+        let parsed = TaskParser.parse("ship notes next week tuesday", now: baselineNow, calendar: calendar)
+        XCTAssertEqual(dayString(parsed.dueDate), "2026-03-10")
+        XCTAssertEqual(parsed.title, "ship notes")
+    }
+
+    func testNextWeekWeekdayWithOnParsing() {
+        let parsed = TaskParser.parse("ship notes next week on tuesday", now: baselineNow, calendar: calendar)
+        XCTAssertEqual(dayString(parsed.dueDate), "2026-03-10")
+        XCTAssertEqual(parsed.title, "ship notes")
+    }
+
+    func testWeekdayThenNextWeekParsing() {
+        let parsed = TaskParser.parse("ship notes tuesday next week", now: baselineNow, calendar: calendar)
+        XCTAssertEqual(dayString(parsed.dueDate), "2026-03-10")
+        XCTAssertEqual(parsed.title, "ship notes")
+    }
+
     func testEndOfMonthParsing() {
         let parsed = TaskParser.parse("send invoice end of month", now: baselineNow, calendar: calendar)
         XCTAssertEqual(dayString(parsed.dueDate), "2026-03-31")

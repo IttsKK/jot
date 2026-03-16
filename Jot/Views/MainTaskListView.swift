@@ -18,6 +18,7 @@ struct MainTaskListView: View {
     @State private var meetingSummaryInput: String = ""
     @State private var meetingSummaryDraft: String = ""
     @State private var taskDetailDraft: TaskDetailDraft? = nil
+    @State private var pendingTaskDetailSyncID: String? = nil
     @State private var selectedNoteID: String? = nil
     @State private var thoughtEditorText: String = ""
     @State private var metadataEditorInput: String = ""
@@ -1317,15 +1318,16 @@ struct MainTaskListView: View {
     // MARK: - Task Details Panel
 
     private func taskDetailsPanel(task: Task) -> some View {
-        let naturalBinding = taskDetailBinding(\.naturalInput, default: task.rawInput.isEmpty ? task.title : task.rawInput)
         let titleBinding = taskDetailBinding(\.title, default: task.title)
         let queueBinding = taskDetailBinding(\.queue, default: task.queue)
         let statusBinding = taskDetailBinding(\.status, default: task.status)
         let personBinding = taskDetailBinding(\.person, default: task.person ?? "")
         let noteBinding = taskDetailBinding(\.note, default: task.note ?? "")
         let dueTextBinding = taskDetailBinding(\.dueText, default: task.dueDateValue.map(dueFieldFormatter.string(from:)) ?? "")
+        let resolvedDueDate = resolvedTaskDetailDueDate(fallback: task.dueDateValue)
+        let showPersonField = queueBinding.wrappedValue == .reachOut || !personBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
-        return VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
                 Button(action: {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -1367,15 +1369,95 @@ struct MainTaskListView: View {
                 .disabled(taskDetailDraft?.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Natural Language")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Task")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.secondary)
                     .kerning(0.5)
 
-                TextField("follow up with Chris tomorrow at 3 about pricing", text: naturalBinding)
+                TextField("Follow up with Chris about pricing", text: titleBinding)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 16, weight: .medium, design: .rounded))
+                    .font(.system(size: 24, weight: .semibold, design: .rounded))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(.thinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(panelStrokeColor, lineWidth: 1)
+                            )
+                    )
+            }
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Queue")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    Picker("Queue", selection: queueBinding) {
+                        ForEach(TaskQueue.allCases, id: \.self) { queue in
+                            Text(queue.displayName).tag(queue)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Status")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    Picker("Status", selection: statusBinding) {
+                        ForEach(TaskStatus.allCases, id: \.self) { status in
+                            Text(status.rawValue.capitalized).tag(status)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+
+                Spacer()
+            }
+
+            if showPersonField {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Person")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .kerning(0.5)
+
+                    TextField("Chris", text: personBinding)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 15, weight: .medium))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(.thinMaterial)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(panelStrokeColor, lineWidth: 1)
+                                )
+                        )
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("When")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .kerning(0.5)
+                    Spacer()
+                    if let resolvedDueDate {
+                        Text(taskDetailDuePreview(resolvedDueDate))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                TextField("tomorrow at 3, next week tuesday, mar 5 2pm", text: dueTextBinding)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 15, weight: .medium))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .background(
@@ -1386,75 +1468,32 @@ struct MainTaskListView: View {
                                     .stroke(panelStrokeColor, lineWidth: 1)
                             )
                     )
-                    .onChange(of: naturalBinding.wrappedValue) { _, _ in
-                        applyNaturalTaskDetailInput()
-                    }
-
-                Text("Type naturally and queue/person/due/note fields update live.")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-
-            TextField("Task title", text: titleBinding)
-                .textFieldStyle(.plain)
-                .font(.system(size: 26, weight: .semibold, design: .rounded))
-                .padding(.horizontal, 4)
-
-            HStack(spacing: 12) {
-                Picker("Queue", selection: queueBinding) {
-                    ForEach(TaskQueue.allCases, id: \.self) { queue in
-                        Text(queue.displayName).tag(queue)
-                    }
-                }
-                .pickerStyle(.menu)
-
-                Picker("Status", selection: statusBinding) {
-                    ForEach(TaskStatus.allCases, id: \.self) { status in
-                        Text(status.rawValue.capitalized).tag(status)
-                    }
-                }
-                .pickerStyle(.menu)
-
-                Spacer()
-            }
-
-            HStack(spacing: 10) {
-                TextField("Person (optional)", text: personBinding)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 13, weight: .medium))
-
-                TextField("Due date/time (optional)", text: dueTextBinding)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 13, weight: .medium))
                     .onChange(of: dueTextBinding.wrappedValue) { _, newValue in
-                        if let parsed = parseDatePhrase(newValue, baseDate: taskDetailDraft?.dueDate ?? task.dueDateValue) {
-                            taskDetailDraft?.dueDate = parsed
-                        } else if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        updateTaskDetailDueText(newValue, fallback: task.dueDateValue)
+                    }
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        taskDetailQuickDateButton("Today", phrase: "today", fallback: task.dueDateValue)
+                        taskDetailQuickDateButton("Tomorrow", phrase: "tomorrow", fallback: task.dueDateValue)
+                        taskDetailQuickDateButton("Next Week", phrase: "next week", fallback: task.dueDateValue)
+                        taskDetailQuickDateButton("Next Tue", phrase: "next week tuesday", fallback: task.dueDateValue)
+                        Button("Clear") {
+                            taskDetailDraft?.dueText = ""
                             taskDetailDraft?.dueDate = nil
                         }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
                     }
-
-                DatePicker(
-                    "",
-                    selection: Binding(
-                        get: { taskDetailDraft?.dueDate ?? task.dueDateValue ?? Date() },
-                        set: { newValue in
-                            taskDetailDraft?.dueDate = newValue
-                            taskDetailDraft?.dueText = dueFieldFormatter.string(from: newValue)
-                        }
-                    ),
-                    displayedComponents: [.date, .hourAndMinute]
-                )
-                .labelsHidden()
-                .datePickerStyle(.compact)
-
-                Button("Clear") {
-                    taskDetailDraft?.dueDate = nil
-                    taskDetailDraft?.dueText = ""
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
+
+                if !dueTextBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   resolvedDueDate == nil {
+                    Text("Try phrases like `tomorrow at 3`, `next week tuesday`, or `mar 5 2pm`.")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -1987,15 +2026,17 @@ struct MainTaskListView: View {
     private func syncTaskDetailDraftFromSelection(force: Bool = false) {
         guard let task = currentSelectedTask else {
             taskDetailDraft = nil
+            pendingTaskDetailSyncID = nil
             return
         }
-        if force || taskDetailDraft?.id != task.id {
+        if force || taskDetailDraft?.id != task.id || pendingTaskDetailSyncID == task.id {
             resetTaskDetailDraft(from: task)
         }
     }
 
     private func resetTaskDetailDraft(from task: Task) {
         taskDetailDraft = TaskDetailDraft(task: task, dueFormatter: dueFieldFormatter)
+        pendingTaskDetailSyncID = nil
     }
 
     private func taskDetailBinding<Value>(_ keyPath: WritableKeyPath<TaskDetailDraft, Value>, default fallback: Value) -> Binding<Value> {
@@ -2008,26 +2049,42 @@ struct MainTaskListView: View {
         )
     }
 
-    private func applyNaturalTaskDetailInput() {
-        guard let naturalInput = taskDetailDraft?.naturalInput.trimmingCharacters(in: .whitespacesAndNewlines),
-              !naturalInput.isEmpty else {
+    private func updateTaskDetailDueText(_ text: String, fallback: Date?) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            taskDetailDraft?.dueDate = nil
             return
         }
 
-        let parsed = TaskParser.parse(naturalInput, fallbackToRawTitle: false)
-        if !parsed.title.isEmpty {
-            taskDetailDraft?.title = parsed.title
+        if let parsed = parseDatePhrase(trimmed, baseDate: taskDetailDraft?.dueDate ?? fallback) {
+            taskDetailDraft?.dueDate = parsed
         }
-        taskDetailDraft?.queue = parsed.queue
-        taskDetailDraft?.person = parsed.person ?? ""
-        taskDetailDraft?.note = parsed.note ?? ""
-        if let due = parsed.dueDate {
-            taskDetailDraft?.dueDate = due
-            taskDetailDraft?.dueText = dueFieldFormatter.string(from: due)
-        } else {
-            taskDetailDraft?.dueDate = nil
-            taskDetailDraft?.dueText = ""
+    }
+
+    private func resolvedTaskDetailDueDate(fallback: Date?) -> Date? {
+        guard let draft = taskDetailDraft else { return fallback }
+        let dueText = draft.dueText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if dueText.isEmpty {
+            return nil
         }
+        return parseDatePhrase(dueText, baseDate: draft.dueDate ?? fallback)
+    }
+
+    private func taskDetailDuePreview(_ date: Date) -> String {
+        "Resolves to \(relativeDate(date))"
+    }
+
+    private func taskDetailQuickDateButton(_ title: String, phrase: String, fallback: Date?) -> some View {
+        Button(title) {
+            taskDetailDraft?.dueText = phrase
+            updateTaskDetailDueText(phrase, fallback: fallback)
+        }
+        .buttonStyle(.plain)
+        .font(.system(size: 12, weight: .medium))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Capsule().fill(Color.secondary.opacity(0.1)))
+        .overlay(Capsule().stroke(Color.secondary.opacity(0.2), lineWidth: 1))
     }
 
     private func saveTaskDetailEdits() {
@@ -2045,10 +2102,10 @@ struct MainTaskListView: View {
             dueDate = draft.dueDate
         }
 
-        let rawInput = draft.naturalInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        pendingTaskDetailSyncID = draft.id
         viewModel.updateTask(
             id: draft.id,
-            rawInput: rawInput.isEmpty ? title : rawInput,
+            rawInput: title,
             title: title,
             queue: draft.queue,
             status: draft.status,
@@ -2056,10 +2113,6 @@ struct MainTaskListView: View {
             dueDate: dueDate,
             note: TaskTextFormatter.formattedNote(draft.note)
         )
-
-        if let selected = currentSelectedTask, selected.id == draft.id {
-            resetTaskDetailDraft(from: selected)
-        }
     }
 
     private func syncMeetingSummaryDraft() {
@@ -2521,7 +2574,6 @@ private struct RegexCaptureMatch {
 
 private struct TaskDetailDraft {
     var id: String
-    var naturalInput: String
     var title: String
     var queue: TaskQueue
     var status: TaskStatus
@@ -2532,7 +2584,6 @@ private struct TaskDetailDraft {
 
     init(task: Task, dueFormatter: DateFormatter) {
         id = task.id
-        naturalInput = task.rawInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? task.title : task.rawInput
         title = task.title
         queue = task.queue
         status = task.status

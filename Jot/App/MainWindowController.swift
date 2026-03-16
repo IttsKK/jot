@@ -3,7 +3,7 @@ import SwiftUI
 
 @MainActor
 final class MainWindowController: NSWindowController, NSWindowDelegate {
-    var onMainWindowClosed: (() -> Void)?
+    var onCloseRequested: (() -> Void)?
 
     init(database: DatabaseManager, settings: SettingsStore, meetingSession: MeetingSession) {
         let root = MainTaskListView(database: database, settings: settings, meetingSession: meetingSession)
@@ -28,7 +28,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func windowWillClose(_ notification: Notification) {
-        onMainWindowClosed?()
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        onCloseRequested?()
+        return false
     }
 }

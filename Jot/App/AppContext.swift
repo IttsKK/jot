@@ -148,8 +148,8 @@ final class AppContext: ObservableObject {
         NSApplication.shared.setActivationPolicy(.regular)
         if mainWindowController == nil {
             mainWindowController = MainWindowController(database: database, settings: settings, meetingSession: meetingSession)
-            mainWindowController?.onMainWindowClosed = { [weak self] in
-                self?.handleMainWindowClosed()
+            mainWindowController?.onCloseRequested = { [weak self] in
+                self?.dismissFrontendKeepingBackgroundRunning()
             }
         }
         mainWindowController?.present()
@@ -186,28 +186,26 @@ final class AppContext: ObservableObject {
         dailyFocusWindowController?.hide()
 
         for window in NSApplication.shared.windows where window.isVisible && !(window is NSPanel) {
-            window.performClose(nil)
+            window.orderOut(nil)
         }
 
-        scheduleRestoreAccessoryActivationIfNeeded()
-    }
-
-    private func handleMainWindowClosed() {
         scheduleRestoreAccessoryActivationIfNeeded()
     }
 
     private func scheduleRestoreAccessoryActivationIfNeeded() {
         _Concurrency.Task { @MainActor [weak self] in
-            await _Concurrency.Task.yield()
+            try? await _Concurrency.Task.sleep(nanoseconds: 50_000_000)
             self?.restoreAccessoryActivationIfNeeded()
         }
     }
 
     private func restoreAccessoryActivationIfNeeded() {
-        let hasVisibleStandardWindow = hasVisibleStandardWindow()
-        if !hasVisibleStandardWindow {
-            NSApplication.shared.setActivationPolicy(.accessory)
-            hideAppIfFullyBackgrounded()
+        guard !hasVisibleStandardWindow() else { return }
+        NSApplication.shared.setActivationPolicy(.accessory)
+        deactivateIfNeeded()
+        _Concurrency.Task { @MainActor [weak self] in
+            try? await _Concurrency.Task.sleep(nanoseconds: 50_000_000)
+            self?.statusBar.refreshStatusItem()
         }
     }
 
@@ -217,18 +215,9 @@ final class AppContext: ObservableObject {
         }
     }
 
-    private func hasVisibleWindow() -> Bool {
-        NSApplication.shared.windows.contains(where: \.isVisible)
-    }
-
-    private func hideAppIfFullyBackgrounded() {
+    private func deactivateIfNeeded() {
         guard NSApplication.shared.isActive else { return }
-        guard !hasVisibleWindow() else { return }
-
-        DispatchQueue.main.async {
-            guard !self.hasVisibleWindow() else { return }
-            NSApplication.shared.hide(nil)
-        }
+        NSApplication.shared.deactivate()
     }
 
     private func updateApplicationIcon() {

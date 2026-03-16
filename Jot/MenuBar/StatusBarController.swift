@@ -3,12 +3,13 @@ import Foundation
 
 @MainActor
 final class StatusBarController: NSObject {
-    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private var statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let database: DatabaseManager
     private let settings: SettingsStore
     private let overlay: OverlayController
     private let meetingSession: MeetingSession
     private var observers: [NSObjectProtocol] = []
+    private var menu: NSMenu?
 
     var onOpenApp: (() -> Void)?
     var onOpenDailyFocus: (() -> Void)?
@@ -24,10 +25,7 @@ final class StatusBarController: NSObject {
         self.meetingSession = meetingSession
         super.init()
 
-        configureStatusItemButton(isInMeeting: false)
-
-        statusItem.menu = NSMenu()
-        statusItem.menu?.delegate = self
+        configureStatusItem()
 
         observers.append(
             NotificationCenter.default.addObserver(forName: .jotDatabaseDidChange, object: nil, queue: .main) { [weak self] _ in
@@ -57,6 +55,21 @@ final class StatusBarController: NSObject {
         overlay.show()
     }
 
+    func refreshStatusItem() {
+        NSStatusBar.system.removeStatusItem(statusItem)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        configureStatusItem()
+        rebuildMenu()
+    }
+
+    @objc private func showStatusMenu() {
+        rebuildMenu()
+        guard let menu else { return }
+
+        NSApp.activate(ignoringOtherApps: true)
+        statusItem.popUpMenu(menu)
+    }
+
     @objc private func openApp() {
         onOpenApp?()
     }
@@ -74,7 +87,7 @@ final class StatusBarController: NSObject {
     }
 
     @objc private func quitApp() {
-        onQuitCompletely?()
+        NSApplication.shared.terminate(nil)
     }
 
     @objc private func startMeeting() {
@@ -109,7 +122,6 @@ final class StatusBarController: NSObject {
     private func rebuildMenu() {
         let menu = NSMenu()
 
-        // Meeting section
         if meetingSession.isInMeeting, let meeting = meetingSession.activeMeeting {
             let meetingItem = NSMenuItem(title: "In Meeting: \(meeting.title)", action: nil, keyEquivalent: "")
             meetingItem.isEnabled = false
@@ -151,12 +163,19 @@ final class StatusBarController: NSObject {
         checkForUpdatesItem.isEnabled = canCheckForUpdates
         menu.addItem(checkForUpdatesItem)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit Jot Completely", action: #selector(quitApp), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
 
         menu.items.forEach { $0.target = self }
-        statusItem.menu = menu
+        self.menu = menu
 
         configureStatusItemButton(isInMeeting: meetingSession.isInMeeting)
+    }
+
+    private func configureStatusItem() {
+        configureStatusItemButton(isInMeeting: meetingSession.isInMeeting)
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(showStatusMenu)
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
     }
 
     private func makeQuickAddMenuItem() -> NSMenuItem {
@@ -224,11 +243,5 @@ final class StatusBarController: NSObject {
         }
 
         button.imageScaling = .scaleProportionallyDown
-    }
-}
-
-extension StatusBarController: NSMenuDelegate {
-    func menuWillOpen(_ menu: NSMenu) {
-        rebuildMenu()
     }
 }
