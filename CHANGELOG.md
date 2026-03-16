@@ -2,6 +2,19 @@
 
 All notable user-facing changes are tracked here. Detailed release bodies remain in [`release-notes/`](release-notes).
 
+## 1.1.9 - 2026-03-15
+
+### Highlights
+
+- Fixed the menu bar icon so it stays clickable after closing the Jot frontend, including on Macs where the system menu bar auto-hides by default.
+- Restored the intended single-process background flow so closing Jot dismisses the frontend and Dock icon while quick capture, Today, and shortcuts stay available.
+- Reworked the task details panel around direct title and due-date editing, with a clearer "When" field and quick date shortcuts.
+
+### Improvements
+
+- Expanded natural-language date parsing for next-week weekday phrases like `next week tuesday`, `next week on tuesday`, and `tuesday next week`.
+- Added regression coverage for the new next-week weekday parser forms.
+
 ## 1.1.8 - 2026-03-12
 
 ### Highlights
