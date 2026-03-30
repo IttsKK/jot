@@ -34,11 +34,11 @@ Examples:
 
 ## Current Release
 
-`1.1.9` is the latest published release as of March 15, 2026.
+`1.1.10` is the latest published release as of March 29, 2026.
 
+- `1.1.10` simplifies the task detail drawer, removes the stray archive section, unifies due-date labels, fixes `/t` preview queue drift, and restores due reminders as real scheduled macOS notifications.
 - `1.1.9` keeps the menu bar icon responsive after closing the frontend, fixes the background close flow on auto-hidden menu bars, and refreshes task details with a clearer due-date editor.
 - `1.1.8` separates closing the Jot frontend from fully terminating the app, so background capture can keep running without leaving the app UI stuck around.
-- `1.1.7` fixes the lingering Dock/frontend state after closing Jot and adds `Check for Updates...` to the standard app menu.
 
 See [CHANGELOG.md](CHANGELOG.md) for the condensed history and [`release-notes/`](release-notes) for version-specific release bodies.
 

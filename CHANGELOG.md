@@ -2,6 +2,20 @@
 
 All notable user-facing changes are tracked here. Detailed release bodies remain in [`release-notes/`](release-notes).
 
+## 1.1.10 - 2026-03-29
+
+### Highlights
+
+- Simplified task editing so due-date changes commit cleanly from the drawer, `Enter` follows the same save path as the Save button, and saving closes the drawer instead of leaving it open in a half-saved state.
+- Removed the stray Archive section from the main task lists and cleaned up the surrounding task-detail flow.
+- Reworked due reminders so Jot schedules real macOS notifications for active dated tasks instead of relying on the old limited follow-up scan.
+
+### Improvements
+
+- Unified due-date labels across the main list, Today list, meeting detail view, and task editor so dates render in one consistent style.
+- Fixed quick capture so `/t` keeps the default note queue while you type instead of flipping back to Work in the live preview.
+- Added regression coverage for due-date formatting, due-notification scheduling, and the `/t` quick-capture flow.
+
 ## 1.1.9 - 2026-03-15
 
 ### Highlights
