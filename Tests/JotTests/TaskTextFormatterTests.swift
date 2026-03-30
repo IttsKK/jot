@@ -13,6 +13,11 @@ final class TaskTextFormatterTests: XCTestCase {
         XCTAssertEqual(formatted, "Sarah O'Connor")
     }
 
+    func testKeepsPossessiveApostropheSuffixLowercase() {
+        let formatted = TaskTextFormatter.formattedTitle("follow up with david's assistant")
+        XCTAssertEqual(formatted, "Follow Up with David's Assistant")
+    }
+
     func testFormatsNoteSentenceCase() {
         let formatted = TaskTextFormatter.formattedNote("send Q4 update")
         XCTAssertEqual(formatted, "Send Q4 update")

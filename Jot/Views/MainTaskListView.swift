@@ -7,7 +7,7 @@ struct MainTaskListView: View {
     @AppStorage(UserDefaultKeys.mainSidebarWidth) private var storedSidebarWidth: Double = 220
     @AppStorage(UserDefaultKeys.mainSidebarCollapsed) private var isSidebarCollapsed = false
     @StateObject private var viewModel: TaskListViewModel
-    @State private var archiveExpanded = false
+    @State private var completedExpanded = false
     @State private var composer: TaskComposerState
     @State private var showDeleteConfirmation = false
     @State private var isComposerInputHovering = false
@@ -24,9 +24,17 @@ struct MainTaskListView: View {
     @State private var metadataEditorInput: String = ""
     @State private var sidebarDragStartWidth: CGFloat?
     @FocusState private var focusedComposerField: ComposerField?
+    @FocusState private var focusedTaskDetailField: TaskDetailField?
 
     private enum ComposerField: Hashable {
         case main
+    }
+
+    private enum TaskDetailField: Hashable {
+        case title
+        case person
+        case due
+        case note
     }
 
     private enum MetadataField: Hashable {
@@ -960,11 +968,9 @@ struct MainTaskListView: View {
         VStack(spacing: 0) {
             HStack {
                 Text("\(viewModel.activeTasks.count) active")
-                Text("•")
-                Text("\(viewModel.completedTasks.count) completed")
-                if !viewModel.archivedTasks.isEmpty {
+                if viewModel.totalCompletedCount > 0 {
                     Text("•")
-                    Text("\(viewModel.archivedTasks.count) archived")
+                    Text("\(viewModel.totalCompletedCount) completed")
                 }
                 Spacer()
             }
@@ -998,13 +1004,15 @@ struct MainTaskListView: View {
                     sectionHeader("Active")
                 }
 
-                if !viewModel.completedTasks.isEmpty {
+                if !viewModel.recentlyCompletedTasks.isEmpty {
                     Section {
-                        ForEach(viewModel.completedTasks) { task in
+                        ForEach(viewModel.recentlyCompletedTasks) { task in
                             TaskRowView(
                                 task: task,
                                 isSelected: viewModel.selectedTaskIDs.contains(task.id),
                                 showQueueBadge: viewModel.selectedItem == .all,
+                                trailingActionTitle: "Undo",
+                                onTrailingAction: { viewModel.toggleDone(task) },
                                 onToggle: { viewModel.toggleDone(task) }
                             )
                             .tag(task.id)
@@ -1019,19 +1027,25 @@ struct MainTaskListView: View {
                             .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
                         }
                     } header: {
-                        sectionHeader("Completed")
+                        HStack {
+                            sectionHeader("Just Completed")
+                            Spacer()
+                            Text("Undo for \(Int(TaskListViewModel.completionUndoWindow))s")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
-                if !viewModel.archivedTasks.isEmpty {
+                if !viewModel.completedTasks.isEmpty {
                     Section {
-                        if archiveExpanded {
-                            ForEach(viewModel.archivedTasks) { task in
+                        if completedExpanded {
+                            ForEach(viewModel.completedTasks) { task in
                                 TaskRowView(
                                     task: task,
                                     isSelected: viewModel.selectedTaskIDs.contains(task.id),
                                     showQueueBadge: viewModel.selectedItem == .all,
-                                    onToggle: {}
+                                    onToggle: { viewModel.toggleDone(task) }
                                 )
                                 .tag(task.id)
                                 .contextMenu {
@@ -1039,7 +1053,7 @@ struct MainTaskListView: View {
                                     Button("Add to Today List") { viewModel.addTaskToDailyFocus(task) }
                                     Button("Delete", role: .destructive) { viewModel.delete(task) }
                                 }
-                                .opacity(0.56)
+                                .opacity(0.62)
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
@@ -1047,11 +1061,11 @@ struct MainTaskListView: View {
                         }
                     } header: {
                         HStack {
-                            sectionHeader("Archive")
+                            sectionHeader("Completed")
                             Spacer()
-                            Button(archiveExpanded ? "Hide" : "Show") {
+                            Button(completedExpanded ? "Hide" : "Show") {
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                    archiveExpanded.toggle()
+                                    completedExpanded.toggle()
                                 }
                             }
                             .buttonStyle(.plain)
@@ -1060,6 +1074,7 @@ struct MainTaskListView: View {
                         }
                     }
                 }
+
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -1203,7 +1218,7 @@ struct MainTaskListView: View {
                     )
 
                     metadataCard(
-                        text: resolvedDueDate.map(relativeDate) ?? "Due Date",
+                        text: resolvedDueDate.map { TaskDueFormatter.compactLabel(for: $0) } ?? "Due Date",
                         field: .due,
                         color: .pink
                     )
@@ -1325,11 +1340,13 @@ struct MainTaskListView: View {
         let noteBinding = taskDetailBinding(\.note, default: task.note ?? "")
         let dueTextBinding = taskDetailBinding(\.dueText, default: task.dueDateValue.map(dueFieldFormatter.string(from:)) ?? "")
         let resolvedDueDate = resolvedTaskDetailDueDate(fallback: task.dueDateValue)
+        let hasInvalidDueText = !dueTextBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && resolvedDueDate == nil
         let showPersonField = queueBinding.wrappedValue == .reachOut || !personBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
         return VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
                 Button(action: {
+                    focusedTaskDetailField = nil
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                         viewModel.clearSelection()
                     }
@@ -1355,10 +1372,12 @@ struct MainTaskListView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
 
-                Button("Save") {
+                Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        saveTaskDetailEdits()
+                        _ = saveTaskDetailEdits(closeAfterSaving: true)
                     }
+                } label: {
+                    Text("Save")
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 12, weight: .bold))
@@ -1366,7 +1385,7 @@ struct MainTaskListView: View {
                 .padding(.vertical, 6)
                 .background(Capsule().fill(Color.accentColor))
                 .foregroundStyle(.white)
-                .disabled(taskDetailDraft?.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+                .disabled(taskDetailDraft?.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true || hasInvalidDueText)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -1378,6 +1397,8 @@ struct MainTaskListView: View {
                 TextField("Follow up with Chris about pricing", text: titleBinding)
                     .textFieldStyle(.plain)
                     .font(.system(size: 24, weight: .semibold, design: .rounded))
+                    .focused($focusedTaskDetailField, equals: .title)
+                    .onSubmit { _ = saveTaskDetailEdits(closeAfterSaving: true) }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 12)
                     .background(
@@ -1428,6 +1449,8 @@ struct MainTaskListView: View {
                     TextField("Chris", text: personBinding)
                         .textFieldStyle(.plain)
                         .font(.system(size: 15, weight: .medium))
+                        .focused($focusedTaskDetailField, equals: .person)
+                        .onSubmit { _ = saveTaskDetailEdits(closeAfterSaving: true) }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
                         .background(
@@ -1449,7 +1472,7 @@ struct MainTaskListView: View {
                         .kerning(0.5)
                     Spacer()
                     if let resolvedDueDate {
-                        Text(taskDetailDuePreview(resolvedDueDate))
+                        Text(TaskDueFormatter.detailLabel(for: resolvedDueDate))
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
@@ -1458,6 +1481,7 @@ struct MainTaskListView: View {
                 TextField("tomorrow at 3, next week tuesday, mar 5 2pm", text: dueTextBinding)
                     .textFieldStyle(.plain)
                     .font(.system(size: 15, weight: .medium))
+                    .focused($focusedTaskDetailField, equals: .due)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .background(
@@ -1471,6 +1495,7 @@ struct MainTaskListView: View {
                     .onChange(of: dueTextBinding.wrappedValue) { _, newValue in
                         updateTaskDetailDueText(newValue, fallback: task.dueDateValue)
                     }
+                    .onSubmit { _ = saveTaskDetailEdits(closeAfterSaving: true) }
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -1505,6 +1530,7 @@ struct MainTaskListView: View {
                     .font(.system(size: 15, weight: .regular))
                     .scrollContentBackground(.hidden)
                     .background(Color.clear)
+                    .focused($focusedTaskDetailField, equals: .note)
                     .frame(minHeight: 120)
                     .padding(10)
                     .background(
@@ -1712,61 +1738,10 @@ struct MainTaskListView: View {
         )
     }
 
-    // MARK: - Date Formatting
-
-    private func relativeDate(_ date: Date) -> String {
-        let calendar = Calendar.current
-        let startOfToday = calendar.startOfDay(for: .now)
-        let startOfDueDay = calendar.startOfDay(for: date)
-        let dayDelta = calendar.dateComponents([.day], from: startOfToday, to: startOfDueDay).day ?? 0
-
-        let dayText: String
-        switch dayDelta {
-        case 0: dayText = "today"
-        case 1: dayText = "tomorrow"
-        case -1: dayText = "yesterday"
-        case 2...6: dayText = shortWeekdayFormatter.string(from: date)
-        default: dayText = shortDateFormatter.string(from: date)
-        }
-
-        if hasExplicitDueTime(date) {
-            return "\(dayText) \(shortTimeFormatter.string(from: date))"
-        }
-        return dayText
-    }
-
-    private func hasExplicitDueTime(_ date: Date) -> Bool {
-        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
-        let hour = components.hour ?? 0
-        let minute = components.minute ?? 0
-        if hour == 0 && minute == 0 { return false }
-        return !(hour == TaskParser.defaultDueHour && minute == TaskParser.defaultDueMinute)
-    }
-
-    private var shortDateFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter
-    }
-
-    private var shortWeekdayFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("EEE")
-        return formatter
-    }
-
-    private var shortTimeFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter
-    }
-
     // MARK: - Resolver Logic
 
     private static let queueSignalPhrases = [
-        "follow up", "follow-up", "check in", "check-in", "reach out", "email", "call", "text", "ping", "contact", "message"
+        "follow up", "follow-up", "check in", "check-in", "reach out", "remind", "email", "call", "text", "ping", "contact", "message"
     ]
 
     private var parsedMain: ParsedTask {
@@ -1804,6 +1779,9 @@ struct MainTaskListView: View {
     }
 
     private var resolvedNote: String? {
+        if resolvedQueue == .thought {
+            return TaskTextFormatter.formattedNote(composer.note)
+        }
         if let parsedNote = parsedMain.note {
             return TaskTextFormatter.formattedNote(parsedNote)
         }
@@ -1811,6 +1789,13 @@ struct MainTaskListView: View {
     }
 
     private var resolvedTitle: String {
+        if resolvedQueue == .thought {
+            let noteTitle = composer.rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !noteTitle.isEmpty {
+                return TaskTextFormatter.formattedTitle(noteTitle)
+            }
+        }
+
         let candidate = parsedMain.title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !candidate.isEmpty {
             return TaskTextFormatter.formattedTitle(candidate)
@@ -1882,52 +1867,27 @@ struct MainTaskListView: View {
     }
 
     private func parseTimeComponents(from input: String) -> DateComponents? {
-        let normalized = input.lowercased().replacingOccurrences(of: ".", with: "")
-
-        let twelveHourPattern = #"\b(\d{1,2})(?::([0-5]\d))?\s*([ap]m)\b"#
-        if let match = firstRegexMatch(twelveHourPattern, in: normalized) {
-            let hourToken = match.captures[0] ?? ""
-            let minuteToken = match.captures[1]
-            let meridiem = match.captures[2] ?? "am"
-            guard let hourValue = Int(hourToken), (1...12).contains(hourValue) else { return nil }
-            let minuteValue = Int(minuteToken ?? "") ?? 0
-            let baseHour = hourValue % 12
-            let hour = meridiem == "pm" ? baseHour + 12 : baseHour
-            return DateComponents(hour: hour, minute: minuteValue, second: 0)
+        if let parsed = TaskParser.parseTimeComponents(from: input) {
+            return parsed
         }
 
-        let twentyFourHourPattern = #"\b([01]?\d|2[0-3]):([0-5]\d)\b"#
-        if let match = firstRegexMatch(twentyFourHourPattern, in: normalized),
-           let hour = Int(match.captures[0] ?? ""),
-           let minute = Int(match.captures[1] ?? "") {
-            return DateComponents(hour: hour, minute: minute, second: 0)
-        }
-
-        return nil
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isStandaloneTimePhrase(trimmed) else { return nil }
+        return TaskParser.parseTimeComponents(from: trimmed, allowBareNumericTime: true)
     }
 
-    private func firstRegexMatch(_ pattern: String, in input: String) -> RegexCaptureMatch? {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
-            return nil
-        }
-        let ns = input as NSString
-        guard let match = regex.firstMatch(in: input, range: NSRange(location: 0, length: ns.length)) else {
-            return nil
-        }
+    private func isStandaloneTimePhrase(_ input: String) -> Bool {
+        let normalized = input.lowercased().replacingOccurrences(of: ".", with: "")
+        let patterns = [
+            #"^(?:noon|midday|midnight)$"#,
+            #"^\d{1,2}(?::[0-5]\d)?\s*[ap]m$"#,
+            #"^\d{1,2}:\d{2}$"#,
+            #"^\d{1,2}$"#
+        ]
 
-        var captures: [String?] = []
-        if match.numberOfRanges > 1 {
-            for index in 1..<match.numberOfRanges {
-                let range = match.range(at: index)
-                if range.location == NSNotFound {
-                    captures.append(nil)
-                } else {
-                    captures.append(ns.substring(with: range))
-                }
-            }
+        return patterns.contains { pattern in
+            normalized.range(of: pattern, options: .regularExpression) != nil
         }
-
-        return RegexCaptureMatch(captures: captures)
     }
 
     private func applyingTime(_ time: DateComponents?, to date: Date) -> Date {
@@ -2070,10 +2030,6 @@ struct MainTaskListView: View {
         return parseDatePhrase(dueText, baseDate: draft.dueDate ?? fallback)
     }
 
-    private func taskDetailDuePreview(_ date: Date) -> String {
-        "Resolves to \(relativeDate(date))"
-    }
-
     private func taskDetailQuickDateButton(_ title: String, phrase: String, fallback: Date?) -> some View {
         Button(title) {
             taskDetailDraft?.dueText = phrase
@@ -2087,19 +2043,19 @@ struct MainTaskListView: View {
         .overlay(Capsule().stroke(Color.secondary.opacity(0.2), lineWidth: 1))
     }
 
-    private func saveTaskDetailEdits() {
-        guard let draft = taskDetailDraft else { return }
+    @discardableResult
+    private func saveTaskDetailEdits(closeAfterSaving: Bool = false) -> Bool {
+        guard let draft = taskDetailDraft else { return false }
         let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return }
+        guard !title.isEmpty else { return false }
 
         let dueText = draft.dueText.trimmingCharacters(in: .whitespacesAndNewlines)
         let dueDate: Date?
         if dueText.isEmpty {
             dueDate = nil
-        } else if let parsed = parseDatePhrase(dueText, baseDate: draft.dueDate) {
-            dueDate = parsed
         } else {
-            dueDate = draft.dueDate
+            guard let parsed = parseDatePhrase(dueText, baseDate: draft.dueDate) else { return false }
+            dueDate = parsed
         }
 
         pendingTaskDetailSyncID = draft.id
@@ -2113,6 +2069,13 @@ struct MainTaskListView: View {
             dueDate: dueDate,
             note: TaskTextFormatter.formattedNote(draft.note)
         )
+        if closeAfterSaving {
+            focusedTaskDetailField = nil
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                viewModel.clearSelection()
+            }
+        }
+        return true
     }
 
     private func syncMeetingSummaryDraft() {
@@ -2431,6 +2394,7 @@ struct MainTaskListView: View {
         } else if focusedComposerField != nil {
             focusedComposerField = nil
         } else if viewModel.hasSelection {
+            focusedTaskDetailField = nil
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 viewModel.clearSelection()
             }
@@ -2439,29 +2403,33 @@ struct MainTaskListView: View {
         }
     }
 
+    private var canUseListKeyboardShortcuts: Bool {
+        focusedComposerField == nil && focusedTaskDetailField == nil
+    }
+
     private func handleListArrowUp() -> Bool {
-        guard focusedComposerField == nil else { return false }
+        guard canUseListKeyboardShortcuts else { return false }
         if case .meeting = viewModel.selectedItem { return false }
         viewModel.moveSelectionUp()
         return true
     }
 
     private func handleListArrowDown() -> Bool {
-        guard focusedComposerField == nil else { return false }
+        guard canUseListKeyboardShortcuts else { return false }
         if case .meeting = viewModel.selectedItem { return false }
         viewModel.moveSelectionDown()
         return true
     }
 
     private func handleListEnter() -> Bool {
-        guard focusedComposerField == nil else { return false }
+        guard canUseListKeyboardShortcuts else { return false }
         guard let task = currentSelectedTask else { return false }
         beginEditing(task)
         return true
     }
 
     private func handleListSpace() -> Bool {
-        guard focusedComposerField == nil else { return false }
+        guard canUseListKeyboardShortcuts else { return false }
         guard viewModel.hasSelection else { return false }
         for task in viewModel.selectedTasks {
             viewModel.toggleDone(task)
@@ -2477,7 +2445,7 @@ struct MainTaskListView: View {
             composer.command = nil
             return true
         }
-        guard focusedComposerField == nil else { return false }
+        guard canUseListKeyboardShortcuts else { return false }
         guard viewModel.hasSelection else { return false }
         if viewModel.isMultiSelect {
             showDeleteConfirmation = true
@@ -2488,7 +2456,7 @@ struct MainTaskListView: View {
     }
 
     private func handleSelectAll() -> Bool {
-        guard focusedComposerField == nil else { return false }
+        guard canUseListKeyboardShortcuts else { return false }
         guard viewModel.selectedMeeting == nil else { return false }
         viewModel.selectAll()
         return true
@@ -2567,10 +2535,6 @@ struct MainTaskListView: View {
 }
 
 // MARK: - Supporting Types
-
-private struct RegexCaptureMatch {
-    let captures: [String?]
-}
 
 private struct TaskDetailDraft {
     var id: String

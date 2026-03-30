@@ -23,16 +23,13 @@ final class DailyFocusListViewModel: ObservableObject {
         }
     }
 
-    var dayKey: String {
-        DatabaseManager.dayKey(for: .now)
-    }
-
     var openCount: Int {
         tasks.filter { $0.status == .active }.count
     }
 
     func refresh() throws {
-        tasks = try database.fetchDailyFocusTasks(dayKey: dayKey)
+        try database.pruneExpiredDailyFocusTasks()
+        tasks = try database.fetchDailyFocusTasks()
     }
 
     func toggleDone(_ task: Task) {

@@ -77,6 +77,15 @@ final class TaskParserTests: XCTestCase {
         XCTAssertEqual(parsed.note, "Q4 Plan")
     }
 
+    func testRemindPersonTriggersFollowUpWithoutSplittingAboutClause() {
+        let parsed = TaskParser.parse("remind Sarah about roadmap", now: baselineNow, calendar: calendar)
+        XCTAssertEqual(parsed.type, .followUp)
+        XCTAssertEqual(parsed.queue, .reachOut)
+        XCTAssertEqual(parsed.person, "Sarah")
+        XCTAssertEqual(parsed.title, "remind Sarah about roadmap")
+        XCTAssertNil(parsed.note)
+    }
+
     func testInDaysParsing() {
         let parsed = TaskParser.parse("draft report in 3 days", now: baselineNow, calendar: calendar)
         XCTAssertEqual(dayString(parsed.dueDate), "2026-03-06")
@@ -97,6 +106,28 @@ final class TaskParserTests: XCTestCase {
         XCTAssertEqual(dayString(parsed.dueDate), "2026-03-04")
         XCTAssertEqual(timeString(parsed.dueDate), "12:00")
         XCTAssertEqual(parsed.title, "email Chris")
+    }
+
+    func testAmbiguousBareHourDefaultsToAfternoonForEarlyHours() {
+        let parsed = TaskParser.parse("email Chris tomorrow at 1", now: baselineNow, calendar: calendar)
+        XCTAssertEqual(dayString(parsed.dueDate), "2026-03-04")
+        XCTAssertEqual(timeString(parsed.dueDate), "13:00")
+    }
+
+    func testExplicitMeridiemOverridesDefaultHourHeuristic() {
+        let noon = TaskParser.parse("email Chris tomorrow at 12pm", now: baselineNow, calendar: calendar)
+        XCTAssertEqual(timeString(noon.dueDate), "12:00")
+
+        let midnight = TaskParser.parse("email Chris tomorrow at 12am", now: baselineNow, calendar: calendar)
+        XCTAssertEqual(timeString(midnight.dueDate), "00:00")
+    }
+
+    func testNamedTimesAreRecognized() {
+        let noon = TaskParser.parse("email Chris tomorrow at noon", now: baselineNow, calendar: calendar)
+        XCTAssertEqual(timeString(noon.dueDate), "12:00")
+
+        let midnight = TaskParser.parse("email Chris tomorrow at midnight", now: baselineNow, calendar: calendar)
+        XCTAssertEqual(timeString(midnight.dueDate), "00:00")
     }
 
     func testNextWeekWeekdayParsing() {

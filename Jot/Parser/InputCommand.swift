@@ -107,6 +107,7 @@ enum InputCommandParser {
                 lower.hasPrefix("check in") ||
                 lower.hasPrefix("check-in") ||
                 lower.hasPrefix("reach out") ||
+                lower.hasPrefix("remind") ||
                 lower.hasPrefix("email") ||
                 lower.hasPrefix("call") ||
                 lower.hasPrefix("text") ||

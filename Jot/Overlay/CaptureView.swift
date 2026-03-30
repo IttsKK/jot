@@ -42,6 +42,7 @@ struct CaptureView: View {
                         .textFieldStyle(.plain)
                         .font(.system(size: 22, weight: .medium, design: .rounded))
                         .focused($focused)
+                        .onExitCommand(perform: dismissCapture)
                         .onChange(of: viewModel.input) { _, _ in
                             viewModel.updateParse()
                         }
@@ -92,10 +93,7 @@ struct CaptureView: View {
                 commandSelectionIndex = min(commandSelectionIndex, commandSuggestions.count - 1)
             }
         }
-        .background(EscapeKeyHandler(onEscape: {
-            viewModel.clear()
-            onDismiss()
-        }, onDeleteBackward: {
+        .background(EscapeKeyHandler(onEscape: dismissCapture, onDeleteBackward: {
             guard focused else { return false }
             guard viewModel.input.isEmpty else { return false }
             if viewModel.activeCommand != nil {
@@ -396,6 +394,11 @@ struct CaptureView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
             focused = true
         }
+    }
+
+    private func dismissCapture() {
+        viewModel.clear()
+        onDismiss()
     }
 }
 

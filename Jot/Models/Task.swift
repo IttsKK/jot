@@ -85,6 +85,6 @@ struct Task: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, E
     var createdAtValue: Date? { DateCodec.date(from: createdAt) }
 
     var isInDailyFocus: Bool {
-        dailyFocusDate == DatabaseManager.dayKey(for: .now)
+        dailyFocusDate != nil
     }
 }

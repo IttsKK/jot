@@ -40,6 +40,14 @@ final class InputCommandParserTests: XCTestCase {
         )
     }
 
+    func testFollowUpCommandDoesNotRewriteRemindPhrasing() {
+        let command = InputCommand(id: "reach_out", kind: .queue(.reachOut), trigger: "/f", label: "Follow Up", prompt: "")
+        XCTAssertEqual(
+            InputCommandParser.expandedRemainder(for: command, remainder: "remind Sarah about roadmap"),
+            "remind Sarah about roadmap"
+        )
+    }
+
     func testUnknownCommandIsIgnored() {
         let consumed = InputCommandParser.consumeLeadingCommand(from: "/unknown ping Chris")
         XCTAssertNil(consumed)

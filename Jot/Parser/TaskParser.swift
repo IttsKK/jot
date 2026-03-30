@@ -111,10 +111,10 @@ enum TaskParser {
     private static func detectType(in input: String) -> ParsedTaskType {
         let lower = input.lowercased()
         let followUpPhrases = [
-            "follow up", "follow-up", "check in", "check-in", "reach out", "email", "call", "text", "ping", "contact"
+            "follow up", "follow-up", "check in", "check-in", "reach out", "email", "call", "text", "ping", "contact", "message"
         ]
 
-        if followUpPhrases.contains(where: { lower.contains($0) }) {
+        if followUpPhrases.contains(where: { lower.contains($0) }) || hasRemindFollowUpSignal(in: input) {
             return .followUp
         }
 
@@ -266,32 +266,99 @@ enum TaskParser {
         return (nil, input)
     }
 
+    static func parseTimeComponents(from input: String, allowBareNumericTime: Bool = false) -> DateComponents? {
+        timeExtraction(from: input, allowBareNumericTime: allowBareNumericTime)?.components
+    }
+
     private static func extractTime(from input: String) -> (DateComponents?, String) {
         let lower = input.lowercased()
+        guard let extraction = timeExtraction(from: input) else {
+            return (nil, input)
+        }
 
-        if let matched = firstMatch(#"\b(?:at|by|around)?\s*(\d{1,2})(?::([0-5]\d))?\s*([ap])\.?m\.?\b"#, in: lower),
+        let remaining = removeToken(from: input, lower: lower, range: extraction.range)
+        return (extraction.components, remaining)
+    }
+
+    private static func timeExtraction(from input: String, allowBareNumericTime: Bool = false) -> TimeExtraction? {
+        let lower = input.lowercased()
+
+        if let matched = firstMatch(#"\b(noon|midday|midnight)\b"#, in: lower),
+           let token = matched.captures[0] {
+            let hour = token == "midnight" ? 0 : 12
+            return TimeExtraction(range: matched.range, components: DateComponents(hour: hour, minute: 0, second: 0))
+        }
+
+        if let matched = firstMatch(#"\b(\d{1,2})(?::([0-5]\d))?\s*([ap])\.?m\.?\b"#, in: lower),
            let hourToken = matched.captures[0],
            let rawHour = Int(hourToken),
            (1...12).contains(rawHour) {
             let minute = Int(matched.captures[1] ?? "") ?? 0
             let meridiem = matched.captures[2] ?? "a"
             let normalizedHour = (rawHour % 12) + (meridiem == "p" ? 12 : 0)
-            let remaining = removeToken(from: input, lower: lower, range: matched.range)
-            return (DateComponents(hour: normalizedHour, minute: minute, second: 0), remaining)
+            return TimeExtraction(
+                range: matched.range,
+                components: DateComponents(hour: normalizedHour, minute: minute, second: 0)
+            )
         }
 
-        if let matched = firstMatch(#"\b(?:at|by|around)\s+([01]?\d|2[0-3])(?::([0-5]\d))?\b"#, in: lower),
+        if let matched = firstMatch(#"\b(\d{1,2}):([0-5]\d)\b"#, in: lower),
            let hourToken = matched.captures[0],
-           let hour = Int(hourToken) {
-            let minute = Int(matched.captures[1] ?? "") ?? 0
-            let remaining = removeToken(from: input, lower: lower, range: matched.range)
-            return (DateComponents(hour: hour, minute: minute, second: 0), remaining)
+           let minuteToken = matched.captures[1],
+           let rawHour = Int(hourToken),
+           let minute = Int(minuteToken),
+           let hour = normalizedHour(for: rawHour, token: hourToken) {
+            return TimeExtraction(
+                range: matched.range,
+                components: DateComponents(hour: hour, minute: minute, second: 0)
+            )
         }
 
-        return (nil, input)
+        if let matched = firstMatch(#"\b(?:at|by|around)\s+(\d{1,2})\b"#, in: lower),
+           let hourToken = matched.captures[0],
+           let rawHour = Int(hourToken),
+           let hour = normalizedHour(for: rawHour, token: hourToken) {
+            return TimeExtraction(
+                range: matched.range,
+                components: DateComponents(hour: hour, minute: 0, second: 0)
+            )
+        }
+
+        if allowBareNumericTime,
+           let matched = firstMatch(#"\b(\d{1,2})\b"#, in: lower),
+           let hourToken = matched.captures[0],
+           let rawHour = Int(hourToken),
+           let hour = normalizedHour(for: rawHour, token: hourToken) {
+            return TimeExtraction(
+                range: matched.range,
+                components: DateComponents(hour: hour, minute: 0, second: 0)
+            )
+        }
+
+        return nil
+    }
+
+    private static func normalizedHour(for rawHour: Int, token: String) -> Int? {
+        guard (0...23).contains(rawHour) else { return nil }
+        if token.count > 1, token.hasPrefix("0") {
+            return rawHour
+        }
+
+        switch rawHour {
+        case 1...7:
+            return rawHour + 12
+        case 0, 12...23:
+            return rawHour
+        default:
+            return rawHour
+        }
     }
 
     private static func extractNote(from input: String) -> (String?, String) {
+        if hasRemindFollowUpSignal(in: input) {
+            return (nil, input)
+        }
+
         let pattern = #"\b(?:about|regarding|re:)\s+(.+)$"#
         guard let match = firstMatch(pattern, in: input),
               let rawRange = Range(match.range, in: input),
@@ -305,6 +372,12 @@ enum TaskParser {
     }
 
     private static func extractPerson(from input: String) -> String? {
+        let remindPersonPattern = #"\bremind\s+(?!me\b)([A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z][A-Za-z'\-]*){0,2}?)(?=\s+(?:about|regarding|re:|today|tonight|tomorrow|tmrw|next\b|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat|sunday|sun|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|in\b|at\b|by\b|around\b|/w\b|/r\b)|$)"#
+        if let match = firstMatch(remindPersonPattern, in: input),
+           let person = match.captures[0] {
+            return cleanupTitle(person)
+        }
+
         if let match = firstMatch(#"\b(follow\s*up|follow-up|check\s*in|check-in|reach\s*out)\s+(?!with\b|to\b)([A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z][A-Za-z'\-]*){0,2})\b"#, in: input),
            let person = match.captures[1] {
             return cleanupTitle(person)
@@ -321,6 +394,10 @@ enum TaskParser {
         }
 
         return nil
+    }
+
+    private static func hasRemindFollowUpSignal(in input: String) -> Bool {
+        firstMatch(#"\bremind\s+(?!me\b)[A-Za-z][A-Za-z'\-]*\b"#, in: input) != nil
     }
 
     private static func cleanupTitle(_ input: String) -> String {
@@ -478,6 +555,11 @@ enum TaskParser {
 private struct RegexMatch {
     var range: NSRange
     var captures: [String?]
+}
+
+private struct TimeExtraction {
+    var range: NSRange
+    var components: DateComponents
 }
 
 private let nextWeekWeekdayPattern = #"\b(?:next\s+week\s+(?:on\s+)?(monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat|sunday|sun)|(monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat|sunday|sun)\s+next\s+week)\b"#

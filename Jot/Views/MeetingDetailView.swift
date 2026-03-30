@@ -218,69 +218,13 @@ struct MeetingDetailView: View {
 
     private func duePill(_ date: Date) -> some View {
         let color: Color = date < Date() ? .red : Calendar.current.isDateInToday(date) ? .orange : .blue
-        return Text("due " + dueLabel(date))
+        return Text(TaskDueFormatter.compactLabel(for: date))
             .font(.system(size: 11, weight: .bold))
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
             .background(Capsule().fill(color.opacity(0.14)))
             .overlay(Capsule().stroke(color.opacity(0.25), lineWidth: 1))
             .foregroundStyle(color.opacity(0.9))
-    }
-
-    private func dueLabel(_ date: Date) -> String {
-        let calendar = Calendar.current
-        let startOfToday = calendar.startOfDay(for: .now)
-        let startOfDueDay = calendar.startOfDay(for: date)
-        let dayDelta = calendar.dateComponents([.day], from: startOfToday, to: startOfDueDay).day ?? 0
-
-        let dayText: String
-        switch dayDelta {
-        case 0:
-            dayText = "today"
-        case 1:
-            dayText = "tomorrow"
-        case -1:
-            dayText = "yesterday"
-        case 2...6:
-            dayText = weekdayFormatter.string(from: date)
-        default:
-            dayText = dateOnlyFormatter.string(from: date)
-        }
-
-        if hasExplicitDueTime(date) {
-            return "\(dayText) \(timeOnlyFormatter.string(from: date))"
-        }
-        return dayText
-    }
-
-    private func hasExplicitDueTime(_ date: Date) -> Bool {
-        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
-        let hour = components.hour ?? 0
-        let minute = components.minute ?? 0
-        if hour == 0 && minute == 0 {
-            return false
-        }
-        return !(hour == TaskParser.defaultDueHour && minute == TaskParser.defaultDueMinute)
-    }
-
-    private var dateOnlyFormatter: DateFormatter {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .none
-        return f
-    }
-
-    private var weekdayFormatter: DateFormatter {
-        let f = DateFormatter()
-        f.setLocalizedDateFormatFromTemplate("EEE")
-        return f
-    }
-
-    private var timeOnlyFormatter: DateFormatter {
-        let f = DateFormatter()
-        f.dateStyle = .none
-        f.timeStyle = .short
-        return f
     }
 
     private var rowStrokeColor: Color {

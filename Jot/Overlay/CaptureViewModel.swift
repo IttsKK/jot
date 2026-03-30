@@ -76,13 +76,16 @@ final class CaptureViewModel: ObservableObject {
         if let q = lockedQueue {
             parsed.queue = q
             if q == .thought { parsed.type = .thought }
+        } else if shouldDefaultToNoteCapture(for: parsed) {
+            parsed.queue = .thought
+            parsed.type = .thought
         }
         refreshCommandSuggestionVisibility()
         refreshPanelHeight()
     }
 
-    /// Strips a single leading slash command and records it. Returns `true` when consumed
-    /// so the caller can bail early — `updateParse` will fire again after `input` changes.
+    /// Strips a single leading slash command, records it, and immediately reparses the
+    /// remaining input so the preview state stays stable within the same update cycle.
     @discardableResult
     private func consumeNextCommand() -> Bool {
         if let consumed = consumeExecutedLeadingCommand(from: input) {
@@ -96,8 +99,7 @@ final class CaptureViewModel: ObservableObject {
                 activeCommand = consumed.command
             }
             commandSuggestionsForced = false
-            refreshCommandSuggestionVisibility()
-            refreshPanelHeight()
+            updateParse()
             return true
         }
         return false
@@ -150,7 +152,8 @@ final class CaptureViewModel: ObservableObject {
             effective.type = .thought
         }
 
-        let title = TaskTextFormatter.formattedTitle(effective.title)
+        let titleSource = effective.queue == .thought ? input : effective.title
+        let title = TaskTextFormatter.formattedTitle(titleSource)
         guard !title.isEmpty else { return }
 
         let meetingId = meetingSession.activeMeeting?.id
@@ -169,13 +172,14 @@ final class CaptureViewModel: ObservableObject {
                 meetingId: meetingId
             )
         } else {
+            let note = effective.queue == .thought ? nil : TaskTextFormatter.formattedNote(effective.note)
             try database.createTask(
                 rawInput: input,
                 title: title,
                 queue: effective.queue,
                 person: person,
                 dueDate: effective.dueDate,
-                note: TaskTextFormatter.formattedNote(effective.note),
+                note: note,
                 meetingId: meetingId,
                 dailyFocusDate: dailyFocusDate
             )

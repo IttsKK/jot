@@ -27,10 +27,10 @@ struct DailyFocusListView: View {
                         Image(systemName: "sun.max.fill")
                             .font(.system(size: 30))
                             .foregroundStyle(.orange.opacity(0.6))
-                        Text("Nothing on today's list")
+                        Text("Nothing on your list")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.secondary)
-                        Text("Use quick capture and tap the sun icon\nto add tasks to your daily focus.")
+                        Text("Use quick capture and tap the sun icon\nto keep tasks pinned here.")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.tertiary)
                             .multilineTextAlignment(.center)
@@ -84,10 +84,6 @@ struct DailyFocusListView: View {
                 .font(.system(size: 15, weight: .bold))
 
             Spacer()
-
-            Text(dayTitle)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -105,12 +101,6 @@ struct DailyFocusListView: View {
         }
     }
 
-    private var dayTitle: String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter.string(from: Date())
-    }
 }
 
 private struct DailyFocusTaskRow: View {
@@ -142,7 +132,7 @@ private struct DailyFocusTaskRow: View {
                     .lineLimit(2)
 
                 if let due = task.dueDateValue {
-                    Text(duePillText(due))
+                    Text(TaskDueFormatter.compactLabel(for: due))
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(dueColor(due).opacity(0.9))
                 }
@@ -158,7 +148,7 @@ private struct DailyFocusTaskRow: View {
                     .foregroundStyle(.tertiary)
             }
             .buttonStyle(.plain)
-            .help("Remove from today's focus")
+            .help("Remove from Today list")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -185,17 +175,6 @@ private struct DailyFocusTaskRow: View {
         case .work: return .orange
         case .reachOut: return .blue
         case .thought: return .indigo
-        }
-    }
-
-    private func duePillText(_ date: Date) -> String {
-        let calendar = Calendar.current
-        let dayDelta = calendar.dateComponents([.day], from: calendar.startOfDay(for: .now), to: calendar.startOfDay(for: date)).day ?? 0
-        switch dayDelta {
-        case 0: return "due today"
-        case 1: return "due tomorrow"
-        case -1: return "overdue"
-        default: return dayDelta < 0 ? "overdue" : "due in \(dayDelta)d"
         }
     }
 

@@ -92,30 +92,61 @@ final class DatabaseManagerTests: XCTestCase {
 
     func testDailyFocusItemCreateToggleAndDelete() throws {
         let item = try db.createDailyFocusItem(title: "Ship patch", dayKey: "2026-03-03")
-        var items = try db.fetchDailyFocusItems(dayKey: "2026-03-03")
+        var items = try db.fetchDailyFocusItems(dayKey: "2026-03-04")
         XCTAssertEqual(items.count, 1)
         XCTAssertEqual(items.first?.id, item.id)
         XCTAssertEqual(items.first?.isDone, false)
 
         try db.toggleDailyFocusDone(id: item.id)
-        items = try db.fetchDailyFocusItems(dayKey: "2026-03-03")
+        items = try db.fetchDailyFocusItems(dayKey: "2026-03-04")
         XCTAssertEqual(items.first?.isDone, true)
 
         try db.deleteDailyFocusItem(id: item.id)
-        items = try db.fetchDailyFocusItems(dayKey: "2026-03-03")
+        items = try db.fetchDailyFocusItems(dayKey: "2026-03-04")
         XCTAssertTrue(items.isEmpty)
     }
 
-    func testCreateDailyFocusFromTaskDeduplicatesByDay() throws {
+    func testCreateDailyFocusFromTaskDeduplicatesAcrossDays() throws {
         let task = try db.createTask(rawInput: "email Dana", title: "email Dana", queue: .reachOut)
 
         let first = try db.createDailyFocusItem(from: task, dayKey: "2026-03-03")
-        let second = try db.createDailyFocusItem(from: task, dayKey: "2026-03-03")
+        let second = try db.createDailyFocusItem(from: task, dayKey: "2026-03-04")
         XCTAssertEqual(first.id, second.id)
 
-        let items = try db.fetchDailyFocusItems(dayKey: "2026-03-03")
+        let items = try db.fetchDailyFocusItems(dayKey: "2026-03-04")
         XCTAssertEqual(items.count, 1)
         XCTAssertEqual(items.first?.sourceTaskId, task.id)
+    }
+
+    func testTaskDailyFocusPersistsAcrossDays() throws {
+        let task = try db.createTask(rawInput: "review PR", title: "review PR", queue: .work)
+
+        try db.setTaskDailyFocus(id: task.id, dayKey: "2026-03-03")
+
+        let tasks = try db.fetchDailyFocusTasks(dayKey: "2026-03-04")
+        XCTAssertEqual(tasks.count, 1)
+        XCTAssertEqual(tasks.first?.id, task.id)
+        XCTAssertEqual(tasks.first?.dailyFocusDate, "2026-03-03")
+        XCTAssertEqual(tasks.first?.isInDailyFocus, true)
+    }
+
+    func testCompletedDailyFocusTaskFallsOutNextDay() throws {
+        let addedOn = date(2026, 3, 3, 9, 0)
+        let completedOn = date(2026, 3, 3, 17, 0)
+        let nextDayKey = "2026-03-04"
+        let sameDayKey = "2026-03-03"
+
+        let task = try db.createTask(rawInput: "ship patch", title: "ship patch", queue: .work, dailyFocusDate: sameDayKey, now: addedOn)
+        try db.toggleDone(id: task.id, now: completedOn)
+
+        let sameDayTasks = try db.fetchDailyFocusTasks(dayKey: sameDayKey)
+        XCTAssertEqual(sameDayTasks.map(\.id), [task.id])
+
+        let nextDayTasks = try db.fetchDailyFocusTasks(dayKey: nextDayKey)
+        XCTAssertTrue(nextDayTasks.isEmpty)
+
+        let refreshedTask = try db.fetchTask(id: task.id)
+        XCTAssertNil(refreshedTask?.dailyFocusDate)
     }
 
     func testCaptureMeetingNoteConsolidatesLegacyMeetingNotes() throws {

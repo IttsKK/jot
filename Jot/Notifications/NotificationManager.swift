@@ -1,53 +1,102 @@
 import Foundation
 import UserNotifications
 
+protocol UserNotificationCenterType: AnyObject {
+    var delegate: UNUserNotificationCenterDelegate? { get set }
+    func requestAuthorization(options: UNAuthorizationOptions, completionHandler: @escaping @Sendable (Bool, Error?) -> Void)
+    func add(_ request: UNNotificationRequest, withCompletionHandler completionHandler: (@Sendable (Error?) -> Void)?)
+    func removePendingNotificationRequests(withIdentifiers identifiers: [String])
+    func removeDeliveredNotifications(withIdentifiers identifiers: [String])
+    func setNotificationCategories(_ categories: Set<UNNotificationCategory>)
+}
+
+extension UNUserNotificationCenter: UserNotificationCenterType {}
+
 @MainActor
 final class NotificationManager: NSObject {
     static let categoryIdentifier = "JOT_REACH_OUT"
     static let actionDoneIdentifier = "JOT_DONE"
     static let actionSnoozeIdentifier = "JOT_SNOOZE"
 
-    private let center: UNUserNotificationCenter?
+    private enum RequestID {
+        static let morningSummary = "jot.morning.summary"
+        static let dueTaskPrefix = "jot.task.due."
+    }
+
+    private enum DefaultKey {
+        static let scheduledDueNotificationIDs = "scheduledDueNotificationIDs"
+    }
+
+    private let center: (any UserNotificationCenterType)?
     private let database: DatabaseManager
     private let settings: SettingsStore
+    private let defaults: UserDefaults
     private var timer: Timer?
+    private var settingsObserver: NSObjectProtocol?
+    private var databaseObserver: NSObjectProtocol?
 
-    init(database: DatabaseManager, settings: SettingsStore) {
-        center = Self.makeNotificationCenterIfAvailable()
+    init(
+        database: DatabaseManager,
+        settings: SettingsStore,
+        center: (any UserNotificationCenterType)? = nil,
+        defaults: UserDefaults = .standard
+    ) {
+        self.center = center ?? Self.makeNotificationCenterIfAvailable()
         self.database = database
         self.settings = settings
+        self.defaults = defaults
         super.init()
-        if let center {
+
+        if let center = self.center {
             center.delegate = self
             configureActions()
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(settingsChanged),
-                name: .jotSettingsDidChange,
-                object: nil
-            )
+        }
+
+        settingsObserver = NotificationCenter.default.addObserver(
+            forName: .jotSettingsDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            _Concurrency.Task { @MainActor [weak self] in
+                self?.refreshScheduledNotifications()
+            }
+        }
+
+        databaseObserver = NotificationCenter.default.addObserver(
+            forName: .jotDatabaseDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            _Concurrency.Task { @MainActor [weak self] in
+                self?.refreshScheduledNotifications()
+            }
         }
     }
 
     deinit {
         timer?.invalidate()
-        NotificationCenter.default.removeObserver(self)
+        if let settingsObserver {
+            NotificationCenter.default.removeObserver(settingsObserver)
+        }
+        if let databaseObserver {
+            NotificationCenter.default.removeObserver(databaseObserver)
+        }
     }
 
     func bootstrap() {
         requestAuthorizationIfNeeded()
-        scheduleMorningSummary()
-        startPeriodicDueScan()
+        refreshScheduledNotifications()
+        startMaintenanceTimer()
     }
 
     func requestAuthorizationIfNeeded() {
         guard let center else { return }
-        center.requestAuthorization(options: [.alert]) { _, _ in }
+        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
     func scheduleMorningSummary() {
         guard let center else { return }
-        center.removePendingNotificationRequests(withIdentifiers: ["jot.morning.summary"])
+        center.removePendingNotificationRequests(withIdentifiers: [RequestID.morningSummary])
         guard settings.notificationsEnabled, settings.summaryEnabled else { return }
 
         var components = DateComponents()
@@ -57,52 +106,60 @@ final class NotificationManager: NSObject {
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
         let content = UNMutableNotificationContent()
         content.title = "Jot Summary"
-
-        let dueCount = (try? database.dueTodayCount()) ?? 0
-        content.body = dueCount == 0 ? "Nothing due today." : "\(dueCount) task(s) due today."
+        content.body = "Open Jot to review what is due today."
         content.sound = nil
         content.badge = 0
 
-        let request = UNNotificationRequest(identifier: "jot.morning.summary", content: content, trigger: trigger)
-        center.add(request)
+        let request = UNNotificationRequest(identifier: RequestID.morningSummary, content: content, trigger: trigger)
+        center.add(request, withCompletionHandler: nil)
     }
 
-    func scheduleDueNotificationsIfNeeded(now: Date = .now, calendar: Calendar = .current) {
+    func scheduleDueNotifications(now: Date = .now, calendar: Calendar = .current) {
         guard let center else { return }
-        guard settings.notificationsEnabled else { return }
-        guard let tasks = try? database.fetchTasks(queue: .reachOut, status: .active) else { return }
 
-        let today = calendar.startOfDay(for: now)
-        let sent = sentNotificationSet(for: today)
-        var newSent = sent
-
-        for task in tasks {
-            guard let due = task.dueDateValue else { continue }
-            if calendar.isDate(due, inSameDayAs: today), due <= now {
-                let key = "reachout|\(task.id)|\(dayKey(today, calendar: calendar))"
-                if sent.contains(key) { continue }
-
-                let content = UNMutableNotificationContent()
-                content.title = "Follow Up Due"
-                content.body = task.title
-                content.categoryIdentifier = Self.categoryIdentifier
-                content.sound = nil
-                content.badge = 0
-
-                let request = UNNotificationRequest(
-                    identifier: key,
-                    content: content,
-                    trigger: UNTimeIntervalNotificationTrigger(timeInterval: 2, repeats: false)
-                )
-                center.add(request)
-                newSent.insert(key)
-            }
+        let existingIDs = scheduledDueNotificationIDs()
+        if !existingIDs.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: existingIDs)
+            center.removeDeliveredNotifications(withIdentifiers: existingIDs)
         }
 
-        setSentNotificationSet(newSent, for: today)
+        guard settings.notificationsEnabled else {
+            setScheduledDueNotificationIDs([])
+            return
+        }
+
+        guard let tasks = try? database.fetchAllTasks() else {
+            setScheduledDueNotificationIDs([])
+            return
+        }
+
+        let scheduledIDs = tasks
+            .filter { $0.status == .active && $0.queue != .thought }
+            .sorted { ($0.dueDateValue ?? .distantFuture) < ($1.dueDateValue ?? .distantFuture) }
+            .compactMap { task -> String? in
+                guard let due = task.dueDateValue, due > now else { return nil }
+
+                let identifier = Self.dueNotificationIdentifier(for: task.id)
+                let content = UNMutableNotificationContent()
+                content.title = task.queue == .reachOut ? "Follow-Up Due" : "Task Due"
+                content.subtitle = TaskDueFormatter.detailLabel(for: due, now: now, calendar: calendar)
+                content.body = task.title
+                content.categoryIdentifier = Self.categoryIdentifier
+                content.sound = .default
+                content.badge = 0
+
+                var components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: due)
+                components.second = 0
+                let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+                let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
+                center.add(request, withCompletionHandler: nil)
+                return identifier
+            }
+
+        setScheduledDueNotificationIDs(scheduledIDs)
     }
 
-    func startPeriodicDueScan() {
+    func startMaintenanceTimer() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -115,13 +172,13 @@ final class NotificationManager: NSObject {
 
     func tick(now: Date = .now) {
         scheduleMorningSummary()
-        scheduleDueNotificationsIfNeeded(now: now)
         try? database.resurfaceOverdueReachOuts(now: now)
         _ = try? database.archiveOldTasks(now: now)
     }
 
-    @objc private func settingsChanged() {
+    private func refreshScheduledNotifications(now: Date = .now) {
         scheduleMorningSummary()
+        scheduleDueNotifications(now: now)
     }
 
     private func configureActions() {
@@ -137,25 +194,19 @@ final class NotificationManager: NSObject {
         center.setNotificationCategories([category])
     }
 
-    private func dayKey(_ date: Date, calendar: Calendar) -> String {
-        let comp = calendar.dateComponents([.year, .month, .day], from: date)
-        return "\(comp.year ?? 0)-\(comp.month ?? 0)-\(comp.day ?? 0)"
+    private static func dueNotificationIdentifier(for taskID: String) -> String {
+        RequestID.dueTaskPrefix + taskID
     }
 
-    private func sentNotificationSet(for date: Date) -> Set<String> {
-        let key = "sentNotifications.\(dayKey(date, calendar: .current))"
-        let value = UserDefaults.standard.array(forKey: key) as? [String] ?? []
-        return Set(value)
+    private func scheduledDueNotificationIDs() -> [String] {
+        defaults.array(forKey: DefaultKey.scheduledDueNotificationIDs) as? [String] ?? []
     }
 
-    private func setSentNotificationSet(_ set: Set<String>, for date: Date) {
-        let key = "sentNotifications.\(dayKey(date, calendar: .current))"
-        UserDefaults.standard.set(Array(set), forKey: key)
+    private func setScheduledDueNotificationIDs(_ identifiers: [String]) {
+        defaults.set(identifiers, forKey: DefaultKey.scheduledDueNotificationIDs)
     }
 
-    private static func makeNotificationCenterIfAvailable() -> UNUserNotificationCenter? {
-        // `swift run` launches from a raw executable path (no .app bundle), where
-        // UserNotifications can assert while resolving process bundle metadata.
+    private static func makeNotificationCenterIfAvailable() -> (any UserNotificationCenterType)? {
         guard Bundle.main.bundleURL.pathExtension == "app" else {
             return nil
         }
@@ -169,7 +220,7 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .list])
+        completionHandler([.banner, .list, .sound])
     }
 
     nonisolated func userNotificationCenter(
@@ -179,8 +230,9 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
     ) {
         let identifier = response.notification.request.identifier
         let actionIdentifier = response.actionIdentifier
-        let parts = identifier.split(separator: "|")
-        let taskID = parts.count >= 2 ? String(parts[1]) : nil
+        let taskID = identifier.hasPrefix(RequestID.dueTaskPrefix)
+            ? String(identifier.dropFirst(RequestID.dueTaskPrefix.count))
+            : nil
 
         if let taskID {
             DispatchQueue.main.async { [weak self] in

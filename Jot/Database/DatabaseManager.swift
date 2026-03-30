@@ -478,7 +478,7 @@ final class DatabaseManager {
 
     @discardableResult
     func createDailyFocusItem(from task: Task, dayKey: String = DatabaseManager.dayKey(for: .now), now: Date = .now) throws -> DailyFocusItem {
-        if let existing = try fetchDailyFocusItem(sourceTaskId: task.id, dayKey: dayKey) {
+        if let existing = try fetchDailyFocusItem(sourceTaskId: task.id) {
             return existing
         }
         return try createDailyFocusItem(title: task.title, sourceTaskId: task.id, dayKey: dayKey, now: now)
@@ -487,7 +487,6 @@ final class DatabaseManager {
     func fetchDailyFocusItems(dayKey: String = DatabaseManager.dayKey(for: .now)) throws -> [DailyFocusItem] {
         try dbQueue.read { db in
             try DailyFocusItem
-                .filter(DailyFocusItem.Columns.dayKey == dayKey)
                 .order(DailyFocusItem.Columns.isDone.asc, DailyFocusItem.Columns.position.asc, DailyFocusItem.Columns.createdAt.asc)
                 .fetchAll(db)
         }
@@ -520,8 +519,8 @@ final class DatabaseManager {
         try dbQueue.write { db in
             for (index, id) in orderedIDs.enumerated() {
                 try db.execute(
-                    sql: "UPDATE daily_focus_items SET position = ? WHERE id = ? AND day_key = ?",
-                    arguments: [index, id, dayKey]
+                    sql: "UPDATE daily_focus_items SET position = ? WHERE id = ?",
+                    arguments: [index, id]
                 )
             }
         }
@@ -549,9 +548,10 @@ final class DatabaseManager {
     }
 
     func fetchDailyFocusTasks(dayKey: String = DatabaseManager.dayKey(for: .now)) throws -> [Task] {
-        try dbQueue.read { db in
+        try pruneExpiredDailyFocusTasks(dayKey: dayKey)
+        return try dbQueue.read { db in
             try Task
-                .filter(Task.Columns.dailyFocusDate == dayKey)
+                .filter(Task.Columns.dailyFocusDate != nil)
                 .order(Task.Columns.status.asc, Task.Columns.position.asc, Task.Columns.createdAt.asc)
                 .fetchAll(db)
         }
@@ -567,6 +567,29 @@ final class DatabaseManager {
         formatter.timeZone = calendar.timeZone
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: day)
+    }
+
+    func pruneExpiredDailyFocusTasks(dayKey: String = DatabaseManager.dayKey(for: .now)) throws {
+        try dbQueue.write { db in
+            let tasks = try Task
+                .filter(Task.Columns.dailyFocusDate != nil)
+                .fetchAll(db)
+
+            for var task in tasks {
+                switch task.status {
+                case .done:
+                    guard let doneAt = task.doneAtValue else { continue }
+                    guard Self.dayKey(for: doneAt) != dayKey else { continue }
+                    task.dailyFocusDate = nil
+                    try task.update(db)
+                case .archived:
+                    task.dailyFocusDate = nil
+                    try task.update(db)
+                case .active:
+                    continue
+                }
+            }
+        }
     }
 
     private func nextPosition(in queue: TaskQueue) throws -> Int64 {
@@ -591,11 +614,10 @@ final class DatabaseManager {
         }
     }
 
-    private func fetchDailyFocusItem(sourceTaskId: String, dayKey: String) throws -> DailyFocusItem? {
+    private func fetchDailyFocusItem(sourceTaskId: String) throws -> DailyFocusItem? {
         try dbQueue.read { db in
             try DailyFocusItem
                 .filter(DailyFocusItem.Columns.sourceTaskId == sourceTaskId)
-                .filter(DailyFocusItem.Columns.dayKey == dayKey)
                 .fetchOne(db)
         }
     }

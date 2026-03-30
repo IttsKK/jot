@@ -47,6 +47,24 @@ final class CaptureViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.input, "")
     }
 
+    func testTodayCommandPreservesDefaultThoughtQueueWhileTyping() throws {
+        let viewModel = try makeViewModel()
+
+        viewModel.input = "/t "
+        viewModel.updateParse()
+
+        XCTAssertTrue(viewModel.addToToday)
+        XCTAssertEqual(viewModel.parsed.queue, .thought)
+        XCTAssertEqual(viewModel.parsed.type, .thought)
+
+        viewModel.input = "capture this idea"
+        viewModel.updateParse()
+
+        XCTAssertTrue(viewModel.addToToday)
+        XCTAssertEqual(viewModel.parsed.queue, .thought)
+        XCTAssertEqual(viewModel.parsed.type, .thought)
+    }
+
     func testExecutedMeetingCommandDisablesTaskParsingAndChips() throws {
         let viewModel = try makeViewModel()
 
@@ -79,6 +97,19 @@ final class CaptureViewModelTests: XCTestCase {
         XCTAssertEqual(thoughts.count, 1)
         XCTAssertEqual(thoughts.first?.queue, .thought)
         XCTAssertEqual(thoughts.first?.title, "Capture This Idea")
+    }
+
+    func testDefaultThoughtCaptureKeepsAboutClauseInTitle() throws {
+        let viewModel = try makeViewModel()
+
+        viewModel.input = "brainstorm about launch copy"
+        viewModel.updateParse()
+        try viewModel.save()
+
+        let thoughts = try viewModel.database.fetchThoughts()
+        XCTAssertEqual(thoughts.count, 1)
+        XCTAssertEqual(thoughts.first?.title, "Brainstorm About Launch Copy")
+        XCTAssertNil(thoughts.first?.note)
     }
 
     func testMeetingNoteCaptureAppendsIntoSingleThought() throws {

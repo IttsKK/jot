@@ -2,6 +2,8 @@ import Foundation
 
 @MainActor
 final class TaskListViewModel: ObservableObject {
+    nonisolated static let completionUndoWindow: TimeInterval = 8
+
     enum SidebarItem: Hashable {
         case all
         case work
@@ -15,6 +17,7 @@ final class TaskListViewModel: ObservableObject {
     @Published var meetings: [Meeting] = []
     @Published var thoughts: [Task] = []
     @Published var selectedTaskIDs: Set<String> = []
+    @Published private(set) var recentlyCompletedTaskIDs: Set<String> = []
 
     var selectedTasks: [Task] { visibleTasks.filter { selectedTaskIDs.contains($0.id) } }
     var hasSelection: Bool { !selectedTaskIDs.isEmpty }
@@ -47,10 +50,19 @@ final class TaskListViewModel: ObservableObject {
     }
 
     private let database: DatabaseManager
+    private let nowProvider: () -> Date
+    private let undoWindow: TimeInterval
     private var observer: NSObjectProtocol?
+    private var completionExpiryWorkItems: [String: DispatchWorkItem] = [:]
 
-    init(database: DatabaseManager) {
+    init(
+        database: DatabaseManager,
+        nowProvider: @escaping () -> Date = Date.init,
+        completionUndoWindow: TimeInterval = TaskListViewModel.completionUndoWindow
+    ) {
         self.database = database
+        self.nowProvider = nowProvider
+        self.undoWindow = completionUndoWindow
         observer = NotificationCenter.default.addObserver(forName: .jotDatabaseDidChange, object: nil, queue: .main) { [weak self] _ in
             DispatchQueue.main.async { try? self?.refresh() }
         }
@@ -59,12 +71,15 @@ final class TaskListViewModel: ObservableObject {
 
     deinit {
         if let observer { NotificationCenter.default.removeObserver(observer) }
+        completionExpiryWorkItems.values.forEach { $0.cancel() }
     }
 
     func refresh() throws {
+        try database.pruneExpiredDailyFocusTasks()
         tasks = try database.fetchAllTasks()
         meetings = try database.fetchMeetings()
         thoughts = try database.fetchThoughts()
+        syncRecentlyCompletedTasks()
     }
 
     var visibleTasks: [Task] {
@@ -81,13 +96,19 @@ final class TaskListViewModel: ObservableObject {
 
     var activeTasks: [Task] { visibleTasks.filter { $0.status == .active } }
 
-    var completedTasks: [Task] {
-        let now = Date()
-        return visibleTasks.filter {
-            guard $0.status == .done, let doneAt = $0.doneAtValue else { return false }
-            return now.timeIntervalSince(doneAt) < 24 * 60 * 60
-        }
+    var recentlyCompletedTasks: [Task] {
+        visibleTasks
+            .filter { $0.status == .done && recentlyCompletedTaskIDs.contains($0.id) }
+            .sorted { ($0.doneAtValue ?? .distantPast) > ($1.doneAtValue ?? .distantPast) }
     }
+
+    var completedTasks: [Task] {
+        visibleTasks
+            .filter { $0.status == .done && !recentlyCompletedTaskIDs.contains($0.id) }
+            .sorted { ($0.doneAtValue ?? .distantPast) > ($1.doneAtValue ?? .distantPast) }
+    }
+
+    var totalCompletedCount: Int { visibleTasks.filter { $0.status == .done }.count }
 
     var archivedTasks: [Task] { visibleTasks.filter { $0.status == .archived } }
 
@@ -168,5 +189,38 @@ final class TaskListViewModel: ObservableObject {
         let orderedIDs = mutableThoughts.map(\.id)
         try? database.reorderTask(queue: .thought, orderedIDs: orderedIDs)
         try? refresh()
+    }
+
+    private func syncRecentlyCompletedTasks() {
+        let now = nowProvider()
+        let recentDoneTasks = tasks.filter { task in
+            guard task.status == .done, let doneAt = task.doneAtValue else { return false }
+            return doneAt.addingTimeInterval(undoWindow) > now
+        }
+
+        let nextIDs = Set(recentDoneTasks.map(\.id))
+        for task in recentDoneTasks {
+            guard let doneAt = task.doneAtValue else { continue }
+            scheduleCompletionExpiry(for: task.id, at: doneAt.addingTimeInterval(undoWindow))
+        }
+
+        for id in completionExpiryWorkItems.keys where !nextIDs.contains(id) {
+            completionExpiryWorkItems[id]?.cancel()
+            completionExpiryWorkItems[id] = nil
+        }
+
+        recentlyCompletedTaskIDs = nextIDs
+    }
+
+    private func scheduleCompletionExpiry(for id: String, at date: Date) {
+        let delay = max(0, date.timeIntervalSince(nowProvider()))
+        completionExpiryWorkItems[id]?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.completionExpiryWorkItems[id] = nil
+            self.recentlyCompletedTaskIDs.remove(id)
+        }
+        completionExpiryWorkItems[id] = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 }

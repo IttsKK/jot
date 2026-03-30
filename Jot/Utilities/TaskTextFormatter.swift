@@ -15,6 +15,10 @@ enum TaskTextFormatter {
         "llm": "LLM"
     ]
 
+    private static let lowercaseApostropheSuffixes: Set<String> = [
+        "s", "t", "d", "ll", "re", "ve", "m"
+    ]
+
     static func formattedTitle(_ title: String) -> String {
         let cleaned = normalizeWhitespace(title)
         guard !cleaned.isEmpty else { return "" }
@@ -92,8 +96,13 @@ enum TaskTextFormatter {
             .map { hyphenPart in
                 hyphenPart
                     .split(separator: "'", omittingEmptySubsequences: false)
-                    .map { apostrophePart in
+                    .enumerated()
+                    .map { index, apostrophePart in
                         guard let first = apostrophePart.first else { return "" }
+                        let lower = apostrophePart.lowercased()
+                        if index > 0, lowercaseApostropheSuffixes.contains(lower) {
+                            return lower
+                        }
                         return String(first).uppercased() + apostrophePart.dropFirst().lowercased()
                     }
                     .joined(separator: "'")

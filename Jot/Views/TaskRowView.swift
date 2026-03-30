@@ -5,6 +5,8 @@ struct TaskRowView: View {
     var task: Task
     var isSelected: Bool = false
     var showQueueBadge: Bool = false
+    var trailingActionTitle: String? = nil
+    var onTrailingAction: (() -> Void)? = nil
     var onToggle: () -> Void
 
     @State private var isHovering = false
@@ -43,7 +45,7 @@ struct TaskRowView: View {
                         todayPill
                     }
                     if let due = task.dueDateValue {
-                        pill(text: relativeDueText(due), color: dueColor(due))
+                        pill(text: TaskDueFormatter.compactLabel(for: due), color: dueColor(due))
                     }
                     if showQueueBadge {
                         pill(text: task.queue.displayName, color: queueColor(task.queue))
@@ -52,6 +54,23 @@ struct TaskRowView: View {
             }
 
             Spacer(minLength: 0)
+
+            if let trailingActionTitle, let onTrailingAction {
+                Button(trailingActionTitle, action: onTrailingAction)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.04))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.08), lineWidth: 1)
+                    )
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -123,33 +142,6 @@ struct TaskRowView: View {
             .foregroundStyle(color.opacity(0.95))
     }
 
-    private func relativeDueText(_ date: Date) -> String {
-        let calendar = Calendar.current
-        let now = Date()
-        let startOfToday = calendar.startOfDay(for: now)
-        let startOfDueDay = calendar.startOfDay(for: date)
-        let dayDelta = calendar.dateComponents([.day], from: startOfToday, to: startOfDueDay).day ?? 0
-
-        let dayText: String
-        switch dayDelta {
-        case 0:
-            dayText = "today"
-        case 1:
-            dayText = "tomorrow"
-        case -1:
-            dayText = "yesterday"
-        case 2...6:
-            dayText = shortWeekdayFormatter.string(from: date)
-        default:
-            dayText = shortDateFormatter.string(from: date)
-        }
-
-        if hasExplicitDueTime(date) {
-            return "due \(dayText) \(shortTimeFormatter.string(from: date))"
-        }
-        return "due \(dayText)"
-    }
-
     private func dueColor(_ date: Date) -> Color {
         if date < Date() {
             return .red
@@ -158,36 +150,6 @@ struct TaskRowView: View {
             return .orange
         }
         return .blue
-    }
-
-    private func hasExplicitDueTime(_ date: Date) -> Bool {
-        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
-        let hour = components.hour ?? 0
-        let minute = components.minute ?? 0
-        if hour == 0 && minute == 0 {
-            return false
-        }
-        return !(hour == TaskParser.defaultDueHour && minute == TaskParser.defaultDueMinute)
-    }
-
-    private var shortDateFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter
-    }
-
-    private var shortWeekdayFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("EEE")
-        return formatter
-    }
-
-    private var shortTimeFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter
     }
 
     private var selectedGradientColors: [Color] {
